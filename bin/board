@@ -1,0 +1,34 @@
+#!/bin/sh
+# board: one command line for task boards.
+set -eu
+
+# Git Bash rewrites arguments that look like POSIX paths before a native exe sees them:
+# "/start" in a body would reach jq as "C:/Program Files/Git/start". Turned off before anything runs.
+MSYS_NO_PATHCONV=1
+MSYS2_ARG_CONV_EXCL='*'
+export MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+
+if [ -z "${BOARD_HOME:-}" ]; then
+    case $0 in
+        */*) board_bin_dir=$(dirname -- "$0") ;;
+        *) board_bin_dir=$(dirname -- "$(command -v -- "$0")") ;;
+    esac
+    BOARD_HOME=$(CDPATH='' cd -- "$board_bin_dir/.." && pwd)
+fi
+# With conversion off, native exes cannot open /c/... paths, so the home is spelled C:/... here.
+if [ -x /usr/bin/cygpath ]; then
+    BOARD_HOME=$(cygpath -m "$BOARD_HOME")
+fi
+export BOARD_HOME
+
+. "$BOARD_HOME/lib/core/util.sh"
+. "$BOARD_HOME/lib/core/exec.sh"
+. "$BOARD_HOME/lib/core/config.sh"
+. "$BOARD_HOME/lib/core/json.sh"
+. "$BOARD_HOME/lib/core/args.sh"
+. "$BOARD_HOME/lib/core/help.sh"
+. "$BOARD_HOME/lib/core/provider.sh"
+. "$BOARD_HOME/lib/core/dispatch.sh"
+. "$BOARD_HOME/lib/cmd/core.sh"
+
+board_main "$@"

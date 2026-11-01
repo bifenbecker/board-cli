@@ -1,0 +1,28 @@
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "pre-push-checks"
+name = "pre-push checks"
+language = "system"
+entry = "sh scripts/run-checks.sh pre_push"
+stages = ["pre-push"]
+pass_filenames = false
+always_run = true
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-yaml" },
+    { id = "check-toml" },
+]
+
+[[repos]]
+repo = "https://github.com/commit-check/commit-check"
+rev = "v2.15.1"
+hooks = [
+    { id = "check-message" },
+    { id = "check-branch", always_run = true },
+]

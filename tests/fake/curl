@@ -1,0 +1,30 @@
+#!/bin/sh
+# curl as board drives it: everything but the URL arrives as a config on stdin, and -w asks for
+# the HTTP status after the body.
+. "$(dirname -- "$0")/_fake.sh"
+fake_url=
+fake_config=
+fake_write=
+while [ $# -gt 0 ]; do
+    case $1 in
+        -K) fake_config=$(fake_stdin); shift 2 ;;
+        -w) fake_write=1; shift 2 ;;
+        -*) shift ;;
+        *) fake_url=$1; shift ;;
+    esac
+done
+fake_method=$(printf '%s\n' "$fake_config" | sed -n 's/^request = "\(.*\)"$/\1/p')
+fake_method=${fake_method:-GET}
+fake_log "curl $fake_method $fake_url"
+fake_path=${fake_url#*://}
+fake_path=/${fake_path#*/}
+fake_find curl "$(fake_rest_key "$fake_method" "$fake_path")"
+if [ -z "$FAKE_FILE" ]; then
+    echo "fake curl: no answer for $fake_method $fake_path" >&2
+    exit 99
+fi
+cat "$FAKE_FILE"
+fake_http=200
+[ ! -f "$FAKE_BASE.status" ] || fake_http=$(tr -d '\r\n' <"$FAKE_BASE.status")
+[ -z "$fake_write" ] || printf '\n%s' "$fake_http"
+exit 0

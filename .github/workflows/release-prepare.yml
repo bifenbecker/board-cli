@@ -1,0 +1,36 @@
+# Run from the Actions tab on main: bumps the version, regenerates the changelog and opens the
+# release request. Merging that request publishes the release (release.yml).
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to release, e.g. v0.2.0 (default: worked out from the commits)"
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      # A token other than GITHUB_TOKEN: a request opened with GITHUB_TOKEN runs no CI.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.AUTOMATION_TOKEN }}
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: just,git-cliff
+      - name: Identify the committer
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Prepare
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: just release ${INPUT_VERSION:+VERSION=$INPUT_VERSION}

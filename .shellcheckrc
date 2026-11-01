@@ -1,0 +1,5 @@
+# board is many files sharing globals and sourcing each other by computed paths,
+# so cross-file checks only produce noise here.
+# SC2015: "[ a ] && [ b ] || fail" is used on purpose; the middle test cannot fail on its own.
+shell=sh
+disable=SC1090,SC1091,SC2015,SC2016,SC2034,SC2153,SC2154

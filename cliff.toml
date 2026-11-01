@@ -1,0 +1,57 @@
+# git-cliff ~ https://git-cliff.org/docs/configuration
+# Only values that differ from the defaults are set.
+
+[changelog]
+header = """
+# Changelog\n
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+body = """
+{{ "\n" }}{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim }}
+    {% for commit in commits %}
+        - {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
+            {{ commit.message | split(pat="\n") | first }}\
+            {% if commit.breaking %} — **BREAKING**{% endif %}\
+    {% endfor %}
+{% endfor %}"""
+trim = true
+# The request number arrives as (#N) in the squash subject; it becomes a link to the pull request.
+postprocessors = [
+    { pattern = '\(#([0-9]+)\)', replace = "([#$1](https://github.com/bifenbecker/board-cli/pull/$1))" },
+]
+
+[git]
+# The commit-msg hook already rejects anything unconventional, so a commit that is not
+# conventional means the hook was bypassed: fail the build rather than drop the entry.
+require_conventional = true
+# A type nobody taught this file about is a mistake, not a silent omission.
+fail_on_unmatched_commit = true
+protect_breaking_commits = true
+commit_parsers = [
+    { message = "^Merge branch", skip = true },
+    { message = "^feat", group = "<!-- 0 -->Added" },
+    { message = "^fix", group = "<!-- 1 -->Fixed" },
+    { message = "^refactor", group = "<!-- 2 -->Changed" },
+    { message = "^perf", group = "<!-- 3 -->Performance" },
+    { message = "^revert", group = "<!-- 4 -->Reverted" },
+    { message = "^(docs|test|chore|ci|build)", skip = true },
+]
+
+[bump]
+# Pre-1.0 a breaking change raises the minor version; the default would jump straight to 1.0.0.
+breaking_always_bump_major = false
+initial_tag = "v0.1.0"
+
+[remote]
+# The request number arrives in the commit subject and the postprocessor links it, so generation
+# never needs the network or a token.
+offline = true

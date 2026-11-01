@@ -1,0 +1,24 @@
+
+# <type>(<scope>): <description> (#<request>)
+#
+# <summary: what the change does, in a sentence or two>
+# <reason: what prompted it, where that is not obvious from the change>
+# <outcome: what is different now — behaviour, contract, performance>
+#
+# BREAKING CHANGE: <what breaks and what callers must do instead>
+# Decision: <a choice made on purpose> — <why>
+# Refs: #<issue>
+# Co-Authored-By: <name> <email>
+#
+# ----------------------------------------------------------------------
+# subject     one line, precise: what changed, not how. Lowercase, no full stop, ~50 chars
+# type        feat fix refactor perf revert docs test chore ci build
+# scope       the module (request, ci, release, core, ...), or the area of work outside one
+# (#request)  the request number. It is not known while the branch is being written — it exists
+#             only once the request is open, and reaches main through the squash message
+# Refs        the GitHub issue, when the work has one. The subject carries no issue number, so
+#             it is never mistaken for the request number
+# body        the details the subject cannot hold. Required for anything non-trivial
+# breaking    also mark the subject: feat(request)!: ...
+# Everything is English: subject, body and footers.
+# Full rules: docs/git-flow.md

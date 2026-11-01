@@ -1,0 +1,11 @@
+#!/bin/sh
+. "$(dirname -- "$0")/_fake.sh"
+fake_log "linear $*"
+case ${1:-} in
+    api) fake_reply linear "$(fake_operation "$(fake_stdin)")" ;;
+    --version)
+        echo "linear 2.5.0"
+        exit 0
+        ;;
+    *) fake_reply linear "$(fake_words "$@")" ;;
+esac

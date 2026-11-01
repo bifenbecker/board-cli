@@ -1,0 +1,96 @@
+# Project declarations: everything the scripts need that differs between projects.
+# Read with `sh scripts/workflow.sh get <dotted.key> [default]`. Values stay on one line.
+
+[git]
+host            = "github"
+default_branch  = "main"
+branch_template = "{type}/{ticket}-{slug}"
+default_type    = "feature"
+squash          = true
+delete_branch   = true
+
+[release]
+version_pattern = '[0-9]+\.[0-9]+\.[0-9]+'   # X.Y.Z only: pre-releases would need a semver comparison
+tag_template    = "v{version}"
+current         = 'cat VERSION'                          # prints the current version
+bump            = 'printf "%s\n" {version} > VERSION'    # sets it; {version} is substituted
+
+[board]
+kind      = "github"
+cli       = "gh"
+url       = "https://github.com/bifenbecker/board-cli"
+project   = "#"
+issue_uri = "/issues/{ticket}"
+
+[board.target]
+owner  = "bifenbecker"
+number = 5
+
+[board.statuses]
+"Todo"        = "todo"
+"In Progress" = "in_progress"
+"Done"        = "done"
+
+[board.labels]
+blocked     = "Cannot proceed until something outside the ticket changes"
+needs-info  = "Cannot proceed until a question is answered"
+spike       = "Time-boxed investigation whose result is an answer, not a change"
+docs        = "Changes documentation rather than behaviour"
+performance = "Aimed at speed or resource use rather than behaviour"
+
+[board.size]
+# T-shirt size: one label per ticket, mirrored in Story Points where the type has the field
+XS = 1   # a few hours
+S  = 2   # up to a day
+M  = 3   # one to two days
+L  = 5   # two to three days; the most one request carries
+XL = 8   # too big for one request; split before starting
+
+[tools]
+required = ["git>=2.38", "just", "jq", "curl", "claude", "gh", "forge", "shellcheck", "git-cliff", "prek"]
+forge    = "forge"
+
+[checks]
+# Names of `runner` recipes. pre_push runs from the prek hook.
+runner   = "just"
+static   = ["lint", "test"]
+pre_push = ["lint", "test"]
+
+[ship]
+compose_model  = "sonnet"
+conflict_paths = []            # dirs where two branches each adding a file conflict, e.g. migrations
+
+[review]
+language       = "ru"
+confidence_min = 70
+density_lines  = 35   # roughly one finding per N reviewed diff lines
+
+[review.shallow]
+# Harder to please than the deep pass: what it reports is fixed on the spot.
+confidence_min = 80
+density_lines  = 50
+model          = "sonnet"
+findings       = 10
+
+[review.deep]
+summary             = "edit"
+max_inline_comments = 10
+blocking_only_from  = 3
+loop_max_iterations = 5
+model               = "sonnet"
+
+# One section per role in docs/review.md. A role named there and missing here has no model to run on.
+[review.deep.roles.engineer]
+model    = "sonnet"
+findings = 5
+
+[review.deep.roles.team_lead]
+model    = "sonnet"
+findings = 3
+
+[worktree]
+dir            = ".worktrees"
+link           = []            # paths linked from the main checkout, e.g. [".env", ".venv"]
+install        = ""            # run inside a new worktree, e.g. "just install"; empty: nothing
+max_diff_lines = 600
+diff_paths     = ["bin", "lib"]

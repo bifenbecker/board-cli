@@ -1,0 +1,19 @@
+# Commit and branch grammar. Explained in docs/git-flow.md, templated in .gitmessage.
+
+[commit]
+conventional_commits  = true
+allow_commit_types    = ["feat", "fix", "refactor", "perf", "revert", "docs", "test", "chore", "ci", "build"]
+subject_max_length    = 72
+subject_min_length    = 5
+allow_merge_commits   = false   # history is linear: rebase, and squash on merge
+allow_wip_commits     = false
+require_signed_off_by = false
+ai_attribution        = "ignore"   # the Co-Authored-By trailer is required here, not forbidden
+
+[branch]
+conventional_branch = true
+allow_branch_types  = ["feature", "bugfix", "hotfix", "release", "chore", "docs", "refactor", "test", "ci"]
+allow_branch_names  = ["main"]
+
+[push]
+allow_force_push = true   # the flow rebases; ship.sh prescribes --force-with-lease
