@@ -1,4 +1,4 @@
-# shellcheck shell=sh disable=SC2016
+# shellcheck shell=sh disable=SC2016,SC2119,SC2120
 
 # The Jira adapter with no network. workflow.toml and any config beside it come with a repository,
 # so the trust cases are written as attacks: each one tries to get the token out of this machine.
