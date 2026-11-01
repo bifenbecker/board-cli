@@ -45,10 +45,8 @@ board_watchdog() {
         done
         kill "$board_wd_pid" 2>/dev/null
     ) >/dev/null 2>&1 </dev/null &
-    board_wd_dog=$!
     board_wd_status=0
     wait "$board_wd_pid" || board_wd_status=$?
-    kill "$board_wd_dog" 2>/dev/null || true
     case $board_wd_status in
         143 | 137) return "$BOARD_EXIT_TIMEOUT" ;;
     esac

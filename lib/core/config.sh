@@ -117,6 +117,11 @@ board_config_load() {
         '') board_usage_die "no [board] kind in $BOARD_CONFIG_FILE; run 'board init --url <board-url>'" ;;
         *) board_usage_die "unknown [board] kind '$BOARD_KIND' in $BOARD_CONFIG_FILE: expected linear, jira, github or gitlab" ;;
     esac
+    # workflow.toml comes with a repository, and a repository must not choose what runs here.
+    case $BOARD_KIND:$BOARD_CLI in
+        linear: | linear:linear | jira: | jira:jira | github: | github:gh | gitlab: | gitlab:glab) ;;
+        *) board_usage_die "[board] cli '$BOARD_CLI' is not the tool of a $BOARD_KIND board: remove it, or set the usual one" ;;
+    esac
     [ -n "$BOARD_URL" ] || board_usage_die "no [board] url in $BOARD_CONFIG_FILE"
     case $BOARD_CONFIG_FILE in
         */*) BOARD_ROOT=${BOARD_CONFIG_FILE%/*} ;;
