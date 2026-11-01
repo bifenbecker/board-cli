@@ -124,6 +124,7 @@ PLATFORM NOTES
   GitHub: lists the items of the project in project order, draft items included, pull requests
           left out. --search reads every page it has to, so it is slower on a big project.
   GitLab: --category needs [board.statuses]: an open issue with no status label has no category.
+  Jira: --status with a name no status has lists nothing on Cloud, and is not an error.
   Linear: --type is not supported; there are no issue types.
 
 EXAMPLES
@@ -272,7 +273,10 @@ OUTPUT
 PLATFORM NOTES
   GitHub: the issue is created in the repository of [board] url and added to the project. Issue
           types exist only in organisations: exit 3 for --type elsewhere.
-  Jira: description is converted from markdown to wiki markup, best effort. One assignee only.
+  Jira: description is converted from markdown to wiki markup, best effort. One assignee only: a
+        second is exit 3. Without --type: the project's subtask type under --parent (an ordinary
+        type under an epic), else [board.defaults] type, else Task. --priority none is exit 3 on
+        Cloud: every issue keeps a priority.
   Linear: one assignee only. --type is not supported.
   GitLab: on Free one assignee only.
 
@@ -349,6 +353,12 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub: a draft item takes only --title, --body and --status.
+  Jira: a parent must be one level up. --parent on an issue of the same level as the parent turns
+        it into a subtask, and --clear parent on a subtask turns it back into [board.defaults]
+        type, else Task: both change its type, on Cloud only, and are exit 3 on Data Center. Any
+        other pair of levels is exit 3. --priority none and --clear priority are exit 3 on Cloud:
+        every issue keeps a priority. One assignee only: add a second and it is exit 3, unless
+        the first is removed in the same call. --sprint needs [board.target] board.
 
 EXAMPLES
   board issue edit KAN-1 --title "A better title"
