@@ -58,7 +58,7 @@ test_due_date_must_be_a_date() {
 
 test_id_cannot_be_a_flag() {
     cmd_board
-    t_run board issue move -x done
+    t_run board issue move -x 'done'
     t_status 2
 }
 
