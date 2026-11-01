@@ -29,9 +29,7 @@ github_sprints() {
 github_sprint_list() {
     github_env
     github_sl_doc=$(github_sprints) || return $?
-    printf '%s' "$github_sl_doc" | _jq -c --arg s "$1" --arg l "$2" '
-        map(select($s == "all" or .state == $s))
-        | if $l == "all" then . else .[:($l | tonumber)] end'
+    printf '%s' "$github_sl_doc" | _jq -c --arg s "$1" 'map(select($s == "all" or .state == $s))' | board_cut "$2"
 }
 
 github_sprint_view() {
