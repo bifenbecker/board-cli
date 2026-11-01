@@ -167,7 +167,7 @@ if [ -x /usr/bin/cygpath ]; then
     # cmd.exe and PowerShell cannot run the wrapper above.
     cat >"$bin.cmd" <<EOF
 @echo off
-call "$(cygpath -w "$home")\\bin\\board.cmd" %*
+"$(cygpath -w "$home")\\bin\\board.cmd" %*
 EOF
 fi
 

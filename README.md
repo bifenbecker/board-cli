@@ -34,6 +34,9 @@ curl -fsSL https://raw.githubusercontent.com/bifenbecker/board-cli/main/install.
 Needs `sh`, `jq`, `curl`, and the login of your board. Works on Linux, macOS and Windows with Git
 Bash. `board self update` moves to a newer release.
 
+From cmd.exe or PowerShell, `board` runs through `board.cmd`, and cmd.exe parses its arguments
+first. Pass text that holds quotes through `--body-file`, or run `board` from Git Bash.
+
 | Board  | Log in with                                      |
 | ------ | ------------------------------------------------ |
 | Linear | `linear auth login`, or set `LINEAR_API_KEY`     |
