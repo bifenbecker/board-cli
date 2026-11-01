@@ -435,6 +435,9 @@ PLATFORM NOTES
         somewhere else.
   GitHub: log in with 'gh auth login'. The project scope is required.
   GitLab: log in with 'glab auth login --hostname <host>'.
+  GitHub, GitLab: a host other than github.com or gitlab.com must be in BOARD_TRUSTED_HOSTS, a
+        space-separated list in your environment, or exit 5: the host comes with a repository, and
+        a token in your environment would go to it.
 
 EXAMPLES
   board auth status
