@@ -349,6 +349,7 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub: a draft item takes only --title, --body and --status.
+  Linear: one assignee only: --add-assignee replaces the current one. --type is not supported.
 
 EXAMPLES
   board issue edit KAN-1 --title "A better title"
@@ -561,7 +562,7 @@ OUTPUT
   JSON: {id, deleted}
 
 PLATFORM NOTES
-  Linear: moves the issue to the trash, where it stays for 30 days.
+  Linear: moves the issue to the trash, where it stays for 30 days. board treats it as gone.
   GitHub: deleting needs admin rights on the repository. A draft item is removed from the project.
   GitLab: deleting needs the Owner role.
 
@@ -872,6 +873,8 @@ PLATFORM NOTES
   GitHub: duplicates also closes <id>.
   GitLab: on Free only relates works: exit 3 for blocks and blocked-by. duplicates is not
           available: exit 3.
+  Linear: two issues hold one link at a time: a new link between them replaces the old one.
+          duplicates also moves <id> to the Duplicate status; removing the link moves it back.
 
 EXAMPLES
   board issue link add KAN-1 KAN-2 --type blocks

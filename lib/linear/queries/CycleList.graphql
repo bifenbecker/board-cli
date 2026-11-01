@@ -1,0 +1,8 @@
+query CycleList {
+  team(id: $team) {
+    cycles(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id number name startsAt endsAt isActive isFuture }
+    }
+  }
+}

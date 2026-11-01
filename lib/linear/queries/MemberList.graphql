@@ -1,0 +1,8 @@
+query MemberList {
+  team(id: $team) {
+    members(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id name displayName }
+    }
+  }
+}

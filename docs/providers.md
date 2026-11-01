@@ -72,17 +72,58 @@ Tool: `linear` (schpet/linear-cli), tested on 2.5.0. npm `latest` is a Rust rewr
 exit codes, so nothing depends on them: only `linear api` is used, and its JSON body is read.
 
 - `linear api -` reads the query from stdin. Variables exist only in argv, so input objects are
-  written into the query as literals.
+  written into the query as literals. A 70 KB description went through this way. An enum literal
+  takes no quotes: `type: blocks`.
+- `linear api --workspace <slug>` picks one of several logins, and fails with a line of text on
+  stderr when that login is missing. The tool refuses the flag when `LINEAR_API_KEY` is set.
 - Errors: not found exits 1 with JSON on **stdout**; an invalid query exits 1 with JSON on
   **stderr**. Read both. `extensions.code` is `AUTHENTICATION_ERROR` or `INPUT_ERROR`;
-  `message` is `Entity not found: Issue` when missing.
-- `issue(id:)` accepts the identifier (`3KD-13`) as well as the UUID.
+  `message` is `Entity not found: Issue` when missing, but `issue not found` for a bad `parentId`.
+  `extensions.userPresentableMessage` is the better text for a person.
+- With no login at all there is no JSON: one line on stderr that ends in `linear auth login`.
+- `issue(id:)` accepts the identifier (`3KD-13`) as well as the UUID. So do `issueUpdate(id:)`,
+  `issueDelete(id:)`, `parentId`, `commentCreate`'s `issueId`, both ids of `issueRelationCreate`, and
+  the filter `parent: {id: {eq: "3KD-13"}}`.
+- `team(id:)` accepts the key. `project(id:)` accepts the `slugId`, the last part of the project's
+  URL slug. `teamId` and `projectId` in an input must be UUIDs.
 - `state.type` values include `duplicate`, on top of `triage backlog unstarted started completed
   canceled`.
-- `description` is normalised by Linear: `- a` comes back as `* a`.
+- `team.states` comes back in no useful order: sort by type, then `position`.
+- `description` is normalised by Linear: `- a` comes back as `* a`, and the line after a list item
+  gets indented.
 - A new issue lands in the team's default state, `Backlog` here, not `Todo`.
-- `workflowStateCreate` works. `workflowStateArchive` fails with `INPUT_ERROR` while issues are in
-  the state; there is no delete.
+- A sub-issue does not follow its parent into a project: `projectId` must be set on it too.
+- `issueDelete` moves the issue to the trash. `issue(id:)` still answers, with `trashed: true`, and
+  `issueUpdate` still works on it. Deleting twice succeeds. `permanentlyDelete: true` removes it at
+  once, and only then is the issue not found.
+- Two issues hold one relation at a time, whichever way round. A second `issueRelationCreate` of
+  the same type returns the first relation; one of another type replaces it. `duplicate` also moves
+  the issue to the `Duplicate` state, and deleting the relation moves it back.
+- `team.labels` holds the team's labels and the workspace's. `issueLabelCreate` of a name that
+  exists in either fails with `INPUT_ERROR`. A label needs no color: Linear picks one.
+- `workflowStateCreate` works and needs a color. `workflowStateArchive` fails with `INPUT_ERROR`
+  while issues are in the state; there is no delete. An archived state stays, visible only with
+  `includeArchived`, and its name can be used again.
+- Cycles are a team setting, `cyclesEnabled`, and a cycle often has `name: null`. A new team's first
+  cycle starts next week, so nothing is active at first.
+- A project milestone has a read-only `status`: `next` while its issues are open, `done` once they
+  all are. A milestone with no issues stays `next`.
+- `containsIgnoreCase` and `eqIgnoreCase` are exact text comparisons: `_` and `%` match only
+  themselves, and case folds in Cyrillic too. So search, label and milestone names can be left to
+  the server. A top-level `or` in a filter is ANDed with the keys beside it.
+- A read can show the state from before a write that already reported success. Seen on 3KD-59: the
+  mutation returned at 21:24:37.9 with `updatedAt` .789, and `issue(id:)` at 21:24:41 to :43 and
+  again later still answered with the old labels and the old `updatedAt`; a read at :58 was right.
+  About one `issue edit` in twenty-five did this on a loaded client (5 of about 120), and none of
+  300 raw update-then-read pairs did, with reads 1 to 20 seconds after the write. The cause is not
+  known. So a write waits for a read that has caught up: an issue write returns the new
+  `updatedAt`, and an equal or later one in the read proves it. A no-op update leaves `updatedAt`
+  as it was. A relation does not touch it, so the link itself is what to wait for.
+- The same lag can reach a read made just before a write. It cannot be avoided for
+  `removedLabelIds`, which is why that list comes from the issue: naming a label the issue lacks
+  fails the whole mutation with `Label not on issue`.
+- `first:` on a nested connection stops there without a word. The list reads 50 labels per issue,
+  because 250 on 100 issues is a lot of complexity; a single issue reads 250 of everything.
 - Rate limit: 2,500 requests and 3,000,000 complexity per hour for an API key.
 
 ## Jira

@@ -1,0 +1,4 @@
+query Teams {
+  organization { urlKey }
+  teams(first: 250) { nodes { key name } }
+}

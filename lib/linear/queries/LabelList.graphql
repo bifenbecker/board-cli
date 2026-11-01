@@ -1,0 +1,8 @@
+query LabelList {
+  team(id: $team) {
+    labels(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id name color description }
+    }
+  }
+}

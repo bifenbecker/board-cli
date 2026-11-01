@@ -39,7 +39,8 @@ OUTPUT
   JSON: array of $SPRINT_SHAPE
 
 PLATFORM NOTES
-  Linear: cycles must be turned on for the team, else exit 3.
+  Linear: cycles must be turned on for the team, else exit 3. id is the cycle number, and a cycle
+          with no name reads as Cycle <number>. --sprint takes the name or the number.
   Jira: needs [board.target] board, and a board that has sprints, else exit 3.
   GitHub: needs [board.target] sprint_field, the name of the project's iteration field.
   GitLab: iterations need a Premium tier: exit 3 on Free.

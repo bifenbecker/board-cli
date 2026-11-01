@@ -1,0 +1,13 @@
+mutation CommentUpdate {
+  commentUpdate(id: $id, input: $input) {
+    comment {
+      id
+      body
+      url
+      createdAt
+      updatedAt
+      user { id name displayName }
+      externalUser { id name }
+    }
+  }
+}

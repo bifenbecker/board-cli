@@ -1,0 +1,6 @@
+query ProjectTeams {
+  project(id: $project) {
+    slugId
+    teams(first: 50) { nodes { key } }
+  }
+}

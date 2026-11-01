@@ -1,0 +1,3 @@
+mutation RelationDelete {
+  issueRelationDelete(id: $id) { success }
+}

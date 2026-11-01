@@ -1,0 +1,3 @@
+mutation CommentDelete {
+  commentDelete(id: $id) { success }
+}

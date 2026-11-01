@@ -1,0 +1,3 @@
+mutation StateCreate {
+  workflowStateCreate(input: $input) { workflowState { id name type } }
+}

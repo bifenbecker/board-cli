@@ -32,6 +32,7 @@ OUTPUT
 PLATFORM NOTES
   GitHub: people who can be assigned in the repository of [board] url.
   Jira: id is the accountId on Cloud and the user name on Data Center.
+  Linear: id is a UUID. --assignee also takes the full name or the display name.
 
 EXAMPLES
   board member list

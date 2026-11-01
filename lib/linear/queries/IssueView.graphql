@@ -1,0 +1,9 @@
+query IssueView {
+  issue(id: $id) {
+    ...IssueRow
+    labels(first: 250) { nodes { id name } }
+    children(first: 250) { nodes { identifier } }
+    relations(first: 250) { nodes { id type relatedIssue { identifier } } }
+    inverseRelations(first: 250) { nodes { id type issue { identifier } } }
+  }
+}

@@ -1,0 +1,3 @@
+mutation IssueCreate {
+  issueCreate(input: $input) { issue { identifier updatedAt } }
+}

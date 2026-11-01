@@ -1,0 +1,8 @@
+query MilestoneList {
+  project(id: $project) {
+    projectMilestones(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id name description status targetDate }
+    }
+  }
+}

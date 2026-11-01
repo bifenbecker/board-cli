@@ -1,0 +1,5 @@
+mutation MilestoneCreate {
+  projectMilestoneCreate(input: $input) {
+    projectMilestone { id name description status targetDate }
+  }
+}

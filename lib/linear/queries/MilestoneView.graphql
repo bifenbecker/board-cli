@@ -1,0 +1,3 @@
+query MilestoneView {
+  projectMilestone(id: $id) { id name description status targetDate }
+}
