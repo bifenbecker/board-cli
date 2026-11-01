@@ -97,14 +97,15 @@ USAGE
 DESCRIPTION
   Lists the issues on the board, most recently updated first. Filters combine with AND; several
   --label flags mean the issue carries all of them. Without --category or --status, only open
-  work is listed: issues in the todo and in_progress categories.
+  work is listed: every issue not in the done or canceled category.
 
 FLAGS
-  -c, --category <c>      todo, in_progress, done, canceled, open (default: the first two) or all
+  -c, --category <c>      todo, in_progress, done, canceled, open (default: neither done nor
+                          canceled, so a status with no category shows) or all
   -s, --status <name>     In this status, by name. Overrides --category
   -a, --assignee <user>   Assigned to this member; @me for yourself; none for unassigned
   -l, --label <name>      Carrying this label; repeat for several
-  -p, --priority <p>      urgent, high, medium, low or none
+  -p, --priority <p>      urgent, high, medium, low, or none for issues without one
       --type <name>       Of this issue type
       --sprint <name>     In this sprint; current for the active one
   -m, --milestone <name>  In this milestone
@@ -120,7 +121,8 @@ OUTPUT
   'board issue view' for the whole issue.
 
 PLATFORM NOTES
-  GitHub: lists the items of the project, draft items included.
+  GitHub: lists the items of the project in project order, draft items included, pull requests
+          left out. --search reads every page it has to, so it is slower on a big project.
   GitLab: --category needs [board.statuses]: an open issue with no status label has no category.
   Linear: --type is not supported; there are no issue types.
 
@@ -268,7 +270,8 @@ OUTPUT
   Exit 6 means the issue exists but a later step failed: the id is on stdout.
 
 PLATFORM NOTES
-  GitHub: the issue is created in the repository of [board] url and added to the project.
+  GitHub: the issue is created in the repository of [board] url and added to the project. Issue
+          types exist only in organisations: exit 3 for --type elsewhere.
   Jira: description is converted from markdown to wiki markup, best effort. One assignee only.
   Linear: one assignee only. --type is not supported.
   GitLab: on Free one assignee only.
@@ -295,6 +298,7 @@ cmd_issue_create() {
         esac
     done
     [ -n "$opt_title" ] || board_usage_die "--title is required"
+    [ -n "$opt_type" ] || opt_type=$(board_config_get .defaults.type)
     issue_intent >"$BOARD_TMP/intent"
     board_doc=$(board_call issue_create <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
@@ -865,7 +869,7 @@ OUTPUT
   JSON: $ISSUE_SHAPE
 
 PLATFORM NOTES
-  GitHub: relates cannot be set: exit 3.
+  GitHub: duplicates also closes <id>.
   GitLab: on Free only relates works: exit 3 for blocks and blocked-by. duplicates is not
           available: exit 3.
 

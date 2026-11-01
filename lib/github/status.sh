@@ -10,41 +10,47 @@ github_status_list() {
         [.fields.nodes[] | select(.name == "Status") | .options[] | {id, name} | make_status($cfg)]'
 }
 
-# Usage: <jq filter over the option list> | github_status_write <filter> — prints the new options.
+# Usage: github_status_write <jq filter over the option list> [<$a>] [<$b>]
+# Values go in as --arg: jq on Windows reads env.* in the ANSI code page, which turns Cyrillic
+# into question marks, and that would be written to the board.
 github_status_write() {
     github_sw_field=$(github_status_field) || return $?
     github_sw_id=$(printf '%s' "$github_sw_field" | _jq -r .id)
     rm -f "$BOARD_TMP/github.meta"
-    printf '%s' "$github_sw_field" | _jq -c --arg id "$github_sw_id" "
-        {fieldId: \$id, options: (.options | map({id, name, color, description}) | $1)}" |
+    printf '%s' "$github_sw_field" | _jq -c --arg field "$github_sw_id" --arg a "${2:-}" --arg b "${3:-}" "
+        {fieldId: \$field, options: (.options | map({id, name, color, description}) | $1)}" |
         github_query SetOptions
+}
+
+# The status as it now is, after a write that went through.
+# Usage: github_status_final <name>
+github_status_final() {
+    github_sn_all=$(github_status_list) || board_partial "$1" "the status changed, but could not be read back"
+    printf '%s' "$github_sn_all" | _jq -c --arg n "$1" '[.[] | select(.name == $n)] | first'
 }
 
 github_status_add() {
     github_sa_have=$(github_status_list) || return $?
-    if printf '%s' "$github_sa_have" | _jq -e --arg n "$1" ''"$BOARD_LIB"' any(.[]; .name | ieq($n))' >/dev/null; then
-        printf '%s' "$github_sa_have" | _jq -c --arg n "$1" ''"$BOARD_LIB"' [.[] | select(.name | ieq($n))] | first'
+    github_sa_hit=$(printf '%s' "$github_sa_have" | _jq -c --arg n "$1" \
+        ''"$BOARD_LIB"' [.[] | select(.name | ieq($n))] | first // empty')
+    if [ -n "$github_sa_hit" ]; then
+        printf '%s' "$github_sa_hit"
         return 0
     fi
-    GH_STATUS_NAME=$1
-    export GH_STATUS_NAME
-    github_status_write '. + [{name: env.GH_STATUS_NAME, color: "GRAY", description: ""}]' >/dev/null || return $?
-    github_status_list | _jq -c --arg n "$1" --arg c "$2" \
-        '[.[] | select(.name == $n)] | first | .category = (.category // $c)'
+    github_status_write '. + [{name: $a, color: "GRAY", description: ""}]' "$1" >/dev/null || return $?
+    github_sa_doc=$(github_status_final "$1") || return $?
+    printf '%s' "$github_sa_doc" | _jq -c --arg c "$2" '.category = (.category // $c)'
 }
 
 github_status_rename() {
-    github_option Status "$1" >/dev/null || return $?
-    GH_STATUS_NAME=$1 GH_STATUS_NEW=$2
-    export GH_STATUS_NAME GH_STATUS_NEW
-    github_status_write 'map(if (.name | ascii_downcase) == (env.GH_STATUS_NAME | ascii_downcase) or .name == env.GH_STATUS_NAME
-                             then .name = env.GH_STATUS_NEW else . end)' >/dev/null || return $?
-    github_status_list | _jq -c --arg n "$2" '[.[] | select(.name == $n)] | first'
+    github_sr_doc=$(github_option Status "$1") || return $?
+    github_sr_id=$(printf '%s' "$github_sr_doc" | _jq -r .option)
+    github_status_write 'map(if .id == $a then .name = $b else . end)' "$github_sr_id" "$2" >/dev/null || return $?
+    github_status_final "$2"
 }
 
 github_status_delete() {
     github_sd_doc=$(github_option Status "$1") || return $?
-    GH_STATUS_ID=$(printf '%s' "$github_sd_doc" | _jq -r .option)
-    export GH_STATUS_ID
-    github_status_write 'map(select(.id != env.GH_STATUS_ID))' >/dev/null
+    github_sd_id=$(printf '%s' "$github_sd_doc" | _jq -r .option)
+    github_status_write 'map(select(.id != $a))' "$github_sd_id" >/dev/null
 }

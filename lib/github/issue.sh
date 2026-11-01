@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 
-# An issue is reached by number, owner/repo#number, or PVTI_ for a project item with no repository.
+# An issue is reached by number, owner/repo#number, or PVTI_ for a project item.
 # Sets GH_ID_ITEM, or GH_ID_REPO and GH_ID_NUMBER.
 github_parse_id() {
     GH_ID_ITEM='' GH_ID_REPO=$GH_REPO GH_ID_NUMBER=''
@@ -30,6 +30,10 @@ github_fetch() {
             board_warn "no project item $GH_ID_ITEM"
             return "$BOARD_EXIT_NOT_FOUND"
         }
+        if [ "$(printf '%s' "$github_ft_doc" | _jq -r '.content.__typename // ""')" = PullRequest ]; then
+            board_warn "$GH_ID_ITEM is a pull request, not an issue"
+            return "$BOARD_EXIT_UNSUPPORTED"
+        fi
         printf '%s' "$github_ft_doc" | _jq -c '{item: .}'
         return 0
     fi
@@ -41,20 +45,27 @@ github_fetch() {
 
 # The raw answer of github_fetch into a normalised issue.
 github_normalise() {
-    _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg repo "$GH_REPO" --argjson number "$GH_NUMBER" '
+    _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg repo "$GH_REPO" --argjson number "$GH_NUMBER" --arg owner "$GH_OWNER" '
         '"$BOARD_LIB"'
-        if .item then (.item | gh_item($cfg; $repo)) else (.issue | gh_issue($cfg; $repo; $number)) end'
+        if .item then (.item | gh_item($cfg; $repo)) else (.issue | gh_issue($cfg; $repo; $number; $owner)) end'
 }
 
-# Sets GH_NODE, GH_ITEM, GH_IS_DRAFT, GH_PARENT_NODE and the GH_ID_* of github_parse_id.
+# From a raw answer sets GH_NODE, GH_ITEM, GH_IS_DRAFT, GH_IS_CLOSED, GH_PARENT_NODE and the
+# GH_ID_* of github_parse_id. A PVTI_ id of a real issue becomes its number and repository here,
+# so every later step works the same for both.
 # Usage: github_ids <raw answer> <id>
 github_ids() {
     github_parse_id "$2"
-    eval "$(printf '%s' "$1" | _jq -r --argjson number "$GH_NUMBER" '
+    eval "$(printf '%s' "$1" | _jq -r --argjson number "$GH_NUMBER" --arg owner "$GH_OWNER" '
+        '"$BOARD_LIB"'
         (if .item then (.item.content // {}) else .issue end) as $c
-        | (if .item then .item.id
-           else ([.issue.projectItems.nodes[] | select(.project.number == $number)] | first | .id // "") end) as $item
-        | @sh "GH_NODE=\($c.id // "" | tostring) GH_ITEM=\($item | tostring) GH_IS_DRAFT=\(if .item and ($c.__typename != "Issue") then "1" else "" end) GH_PARENT_NODE=\($c.parent.id // "" | tostring)"')"
+        | (if .item then .item.id else (.issue.projectItems.nodes | gh_our_item($number; $owner) | .id // "") end) as $item
+        | ($c.__typename == "Issue" or (.item | not)) as $is_issue
+        | @sh "GH_NODE=\($c.id // "" | tostring) GH_ITEM=\($item | tostring) GH_IS_DRAFT=\(if $is_issue then "" else "1" end)",
+          @sh "GH_PARENT_NODE=\($c.parent.id // "" | tostring) GH_IS_CLOSED=\(if $c.state == "CLOSED" then "1" else "" end)",
+          (if .item and $is_issue then
+              @sh "GH_ID_ITEM='' GH_ID_REPO=\($c.repository.nameWithOwner | tostring) GH_ID_NUMBER=\($c.number | tostring)"
+           else empty end)')"
 }
 
 github_issue_view() {
@@ -62,10 +73,27 @@ github_issue_view() {
     printf '%s' "$github_iv_doc" | github_normalise
 }
 
-# The node id of another issue, for parent and links.
+# The node id of an issue that can be a parent or a link. A draft has neither.
 github_node_of() {
     github_no_doc=$(github_fetch "$1") || return $?
-    printf '%s' "$github_no_doc" | _jq -r '(.issue.id // .item.content.id) // empty'
+    github_no_id=$(printf '%s' "$github_no_doc" | _jq -r '.issue.id // (.item.content | select(.__typename == "Issue") | .id) // empty')
+    [ -n "$github_no_id" ] || {
+        board_warn "$1 is a draft item: it cannot be a parent or a link"
+        return "$BOARD_EXIT_UNSUPPORTED"
+    }
+    printf '%s' "$github_no_id"
+}
+
+# After a failed step: exit 6 with the id once a write went through, else the step's own status.
+# Usage: step || { github_stop "$?" <id> <message>; return $?; }
+github_stop() {
+    [ -z "${GH_WROTE:-}" ] || board_partial "$2" "$3"
+    return "$1"
+}
+
+# The answer that ends a write. The write is done whatever happens to this read.
+github_final_view() {
+    github_issue_view "$1" || board_partial "$1" "the change went through, but the issue could not be read back"
 }
 
 # --- list --------------------------------------------------------------------------------
@@ -73,13 +101,18 @@ github_node_of() {
 github_list_page() {
     github_lp_doc=$(printf '%s' "$GH_LIST_VARS" | _jq -c --arg after "$1" \
         '. + {after: (if $after == "" then null else $after end)}' | github_field_vars | github_query BoardItems) || return $?
+    if ! printf '%s' "$github_lp_doc" | _jq -e '.repositoryOwner.projectV2 != null' >/dev/null; then
+        board_warn "no project $GH_NUMBER under $GH_OWNER"
+        return "$BOARD_EXIT_NOT_FOUND"
+    fi
     printf '%s' "$github_lp_doc" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg repo "$GH_REPO" \
         --argjson filter "$GH_LIST_FILTER" '
         '"$BOARD_LIB"'
         .repositoryOwner.projectV2.items as $page
         | {has_next: $page.pageInfo.hasNextPage, end_cursor: $page.pageInfo.endCursor,
-           nodes: [$page.nodes[] | select(.isArchived | not) | select(.content != null)
-                   | gh_item($cfg; $repo) | select(gh_keep($filter))]}'
+           nodes: [$page.nodes[] | select(.isArchived | not) | select(.type != "PULL_REQUEST")
+                   | select(.content != null)
+                   | gh_item($cfg; $repo) | select(gh_keep($filter; $repo))]}'
 }
 
 github_issue_list() {
@@ -89,98 +122,134 @@ github_issue_list() {
     case $(printf '%s' "$GH_LIST_FILTER" | _jq -r '.assignee // ""') in
         @me) github_il_me=$(github_viewer) || return $? ;;
     esac
-    GH_LIST_FILTER=$(printf '%s' "$GH_LIST_FILTER" | _jq -c --arg me "$github_il_me" \
-        'if .assignee == "@me" then .assignee = $me else . end')
-    GH_LIST_VARS=$(printf '%s' "$GH_LIST_FILTER" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" \
-        --arg owner "$GH_OWNER" --argjson number "$GH_NUMBER" '
+    github_il_sprint=''
+    if [ "$(printf '%s' "$GH_LIST_FILTER" | _jq -r '.sprint // ""')" = current ]; then
+        board_provider_load sprint
+        github_il_doc=$(github_sprint_current 2>/dev/null) || {
+            printf '[]'
+            return 0
+        }
+        github_il_sprint=$(printf '%s' "$github_il_doc" | _jq -r .name)
+    fi
+    GH_LIST_FILTER=$(printf '%s' "$GH_LIST_FILTER" | _jq -c --arg me "$github_il_me" --arg sprint "$github_il_sprint" '
+        (if .assignee == "@me" then .assignee = $me else . end)
+        | (if $sprint != "" then .sprint = $sprint else . end)')
+    GH_LIST_VARS=$(printf '%s' "$GH_LIST_FILTER" | _jq -c --arg owner "$GH_OWNER" --argjson number "$GH_NUMBER" '
         '"$BOARD_LIB"'
-        {owner: $owner, number: $number, first: 100, query: gh_filter_query($cfg)}')
+        {owner: $owner, number: $number, first: 100, query: gh_filter_query}')
     github_il_limit=$(printf '%s' "$GH_LIST_FILTER" | _jq -r '.limit // "all"')
     board_paged github_list_page "$github_il_limit"
 }
 
 # --- fields on the project ---------------------------------------------------------------
 
-# Usage: github_set_field <item> <field id> <value JSON>
-github_set_field() {
-    github_sf_meta=$(github_meta) || return $?
-    printf '%s\n' "$github_sf_meta" | _jq -c --arg item "$1" --arg field "$2" --argjson value "$3" \
-        '{projectId: .id, itemId: $item, fieldId: $field, value: $value}' | github_query SetField >/dev/null
+github_plan_field() {
+    GH_PLAN=$(printf '%s' "$GH_PLAN" | _jq -c --arg f "$1" --argjson v "$2" '. + [{field: $f, value: $v}]')
 }
 
-github_set_status() {
-    github_ss_doc=$(github_option Status "$2") || return $?
-    github_ss_field=$(printf '%s' "$github_ss_doc" | _jq -r .field)
-    github_ss_value=$(printf '%s' "$github_ss_doc" | _jq -c '{singleSelectOptionId: .option}')
-    github_set_field "$1" "$github_ss_field" "$github_ss_value"
+github_plan_clear() {
+    GH_PLAN=$(printf '%s' "$GH_PLAN" | _jq -c --arg f "$1" '. + [{field: $f, value: null}]')
 }
 
-github_clear_field() {
-    github_cf_meta=$(github_meta) || return $?
-    github_cf_field=$(printf '%s' "$github_cf_meta" | _jq -r --arg f "$2" '
-        '"$BOARD_LIB"' [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
-    [ -n "$github_cf_field" ] || {
-        board_warn "this project has no field '$2'"
+# The id of a project field by name, or nothing.
+github_field_id() {
+    github_fi_meta=$(github_meta) || return $?
+    printf '%s' "$github_fi_meta" | _jq -r --arg f "$1" '
+        '"$BOARD_LIB"'
+        [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""'
+}
+
+# Usage: github_plan_option <field name> <option name>
+github_plan_option() {
+    github_po_doc=$(github_option "$1" "$2") || return $?
+    github_plan_field "$(printf '%s' "$github_po_doc" | _jq -r .field)" \
+        "$(printf '%s' "$github_po_doc" | _jq -c '{singleSelectOptionId: .option}')"
+}
+
+# Usage: github_require_field <field name> <hint>  — sets GH_FIELD_ID, or exit 3.
+github_require_field() {
+    GH_FIELD_ID=$(github_field_id "$1") || return $?
+    [ -n "$GH_FIELD_ID" ] || {
+        board_warn "this project has no field '$1'${2:+: $2}"
         return "$BOARD_EXIT_UNSUPPORTED"
     }
-    printf '%s\n' "$github_cf_meta" | _jq -c --arg item "$1" --arg field "$github_cf_field" \
-        '{projectId: .id, itemId: $item, fieldId: $field}' | github_query ClearField >/dev/null
 }
 
-# Sets the project fields an intent names. Usage: github_apply_fields <item> <intent>
-github_apply_fields() {
-    eval "$(printf '%s' "$2" | _jq -r --argjson cfg "$BOARD_CONFIG_JSON" '
-        @sh "github_af_status=\(.status // "") github_af_due=\(.due // "") github_af_sprint=\(.sprint // "")",
-        @sh "github_af_priority=\(if .priority then ($cfg.priority[.priority] // "") else "" end) github_af_want_priority=\(.priority // "")",
-        @sh "github_af_clear=\(.clear | join(" "))"')"
-    if [ -n "$github_af_status" ]; then
-        github_set_status "$1" "$github_af_status" || return $?
+# Turns what an intent asks of project fields into GH_PLAN, and writes nothing. Every name is
+# checked here, so a wrong status or an undeclared priority stops before the first write.
+# Usage: github_plan <intent>
+github_plan() {
+    GH_PLAN='[]'
+    eval "$(printf '%s' "$1" | _jq -r --argjson cfg "$BOARD_CONFIG_JSON" '
+        @sh "github_pl_status=\(.status // "" | tostring) github_pl_due=\(.due // "" | tostring) github_pl_sprint=\(.sprint // "" | tostring)",
+        @sh "github_pl_want=\(.priority // "" | tostring) github_pl_priority=\(if .priority then ($cfg.priority[.priority] // "" | tostring) else "" end)",
+        @sh "github_pl_clear=\(.clear | join(" "))"')"
+    if [ -n "$github_pl_status" ]; then
+        github_plan_option Status "$github_pl_status" || return $?
     fi
-    if [ -n "$github_af_want_priority" ]; then
-        [ -n "$github_af_priority" ] || {
-            board_warn "priority $github_af_want_priority is not declared: add it to [board.priority]"
+    case $github_pl_want in
+        '') ;;
+        none)
+            github_require_field "$GH_PRIORITY_FIELD" "declare it in [board.target] priority_field" || return $?
+            github_plan_clear "$GH_FIELD_ID"
+            ;;
+        *)
+            [ -n "$github_pl_priority" ] || {
+                board_warn "priority $github_pl_want is not declared: add it to [board.priority]"
+                return "$BOARD_EXIT_UNSUPPORTED"
+            }
+            github_plan_option "$GH_PRIORITY_FIELD" "$github_pl_priority" || return $?
+            ;;
+    esac
+    if [ -n "$github_pl_due" ]; then
+        github_require_field "$GH_DUE_FIELD" "add a date field, or set [board.target] due_field" || return $?
+        github_plan_field "$GH_FIELD_ID" "$(_jq -nc --arg d "$github_pl_due" '{date: $d}')"
+    fi
+    if [ -n "$github_pl_sprint" ]; then
+        [ -n "$GH_SPRINT_FIELD" ] || {
+            board_warn "declare [board.target] sprint_field: the name of the project's iteration field"
             return "$BOARD_EXIT_UNSUPPORTED"
         }
-        github_af_doc=$(github_option "$GH_PRIORITY_FIELD" "$github_af_priority") || return $?
-        github_set_field "$1" "$(printf '%s' "$github_af_doc" | _jq -r .field)" \
-            "$(printf '%s' "$github_af_doc" | _jq -c '{singleSelectOptionId: .option}')" || return $?
+        github_require_field "$GH_SPRINT_FIELD" || return $?
+        github_pl_field=$GH_FIELD_ID
+        github_pl_it=$(github_iteration_id "$github_pl_sprint") || return $?
+        github_plan_field "$github_pl_field" "$(_jq -nc --arg i "$github_pl_it" '{iterationId: $i}')"
     fi
-    if [ -n "$github_af_due" ]; then
-        github_af_meta=$(github_meta) || return $?
-        github_af_field=$(printf '%s' "$github_af_meta" | _jq -r --arg f "$GH_DUE_FIELD" '
-            '"$BOARD_LIB"' [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
-        [ -n "$github_af_field" ] || {
-            board_warn "this project has no date field '$GH_DUE_FIELD': add one, or set [board.target] due_field"
-            return "$BOARD_EXIT_UNSUPPORTED"
-        }
-        github_set_field "$1" "$github_af_field" "$(_jq -nc --arg d "$github_af_due" '{date: $d}')" || return $?
-    fi
-    if [ -n "$github_af_sprint" ]; then
-        github_sprint_field_id || return $?
-        github_af_it=$(github_iteration_id "$github_af_sprint") || return $?
-        github_set_field "$1" "$GH_SPRINT_FIELD_ID" "$(_jq -nc --arg i "$github_af_it" '{iterationId: $i}')" || return $?
-    fi
-    for github_af_field in $github_af_clear; do
-        case $github_af_field in
-            priority) github_clear_field "$1" "$GH_PRIORITY_FIELD" || return $? ;;
-            due) github_clear_field "$1" "$GH_DUE_FIELD" || return $? ;;
-            sprint) github_clear_field "$1" "${GH_SPRINT_FIELD:-Sprint}" || return $? ;;
+    for github_pl_name in $github_pl_clear; do
+        case $github_pl_name in
+            priority)
+                github_require_field "$GH_PRIORITY_FIELD" || return $?
+                github_plan_clear "$GH_FIELD_ID"
+                ;;
+            due)
+                github_require_field "$GH_DUE_FIELD" || return $?
+                github_plan_clear "$GH_FIELD_ID"
+                ;;
+            sprint)
+                github_require_field "${GH_SPRINT_FIELD:-Sprint}" || return $?
+                github_plan_clear "$GH_FIELD_ID"
+                ;;
         esac
     done
 }
 
-github_sprint_field_id() {
-    [ -n "$GH_SPRINT_FIELD" ] || {
-        board_warn "declare [board.target] sprint_field: the name of the project's iteration field"
-        return "$BOARD_EXIT_UNSUPPORTED"
-    }
-    github_sp_meta=$(github_meta) || return $?
-    GH_SPRINT_FIELD_ID=$(printf '%s' "$github_sp_meta" | _jq -r --arg f "$GH_SPRINT_FIELD" '
-        '"$BOARD_LIB"' [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
-    [ -n "$GH_SPRINT_FIELD_ID" ] || {
-        board_warn "this project has no field '$GH_SPRINT_FIELD'"
-        return "$BOARD_EXIT_UNSUPPORTED"
-    }
+# Writes GH_PLAN to an item, noting each write.
+github_plan_apply() {
+    github_pa_meta=$(github_meta) || return $?
+    github_pa_project=$(printf '%s' "$github_pa_meta" | _jq -r .id)
+    printf '%s' "$GH_PLAN" | _jq -c '.[]' >"$BOARD_TMP/plan"
+    while IFS= read -r github_pa_op; do
+        if [ "$(printf '%s' "$github_pa_op" | _jq -r '.value == null')" = true ]; then
+            printf '%s' "$github_pa_op" | _jq -c --arg project "$github_pa_project" --arg item "$1" \
+                '{projectId: $project, itemId: $item, fieldId: .field}' |
+                github_query ClearField >/dev/null || return $?
+        else
+            printf '%s' "$github_pa_op" | _jq -c --arg project "$github_pa_project" --arg item "$1" \
+                '{projectId: $project, itemId: $item, fieldId: .field, value: .value}' |
+                github_query SetField >/dev/null || return $?
+        fi
+        GH_WROTE=1
+    done <"$BOARD_TMP/plan"
 }
 
 # Usage: github_iteration_id <name|current>
@@ -197,9 +266,20 @@ github_iteration_id() {
     printf '%s' "$github_it_id"
 }
 
+# Adds the issue to the project when it is not there, leaving the item in GH_ITEM.
+github_ensure_item() {
+    [ -z "$GH_ITEM" ] || return 0
+    github_ei_meta=$(github_meta) || return $?
+    GH_ITEM=$(printf '%s\n' "$github_ei_meta" | _jq -c --arg node "$GH_NODE" \
+        '{projectId: .id, contentId: $node}' | github_query AddItem) || return $?
+    GH_ITEM=$(printf '%s' "$GH_ITEM" | _jq -r .addProjectV2ItemById.item.id)
+    GH_WROTE=1
+}
+
 # --- write -------------------------------------------------------------------------------
 
 # Resolves names in an intent to what the REST API takes: @me to a login, a milestone to its number.
+# Uses GH_ID_REPO, which a milestone number belongs to.
 github_resolve_intent() {
     github_ri_intent=$1
     github_ri_me=''
@@ -208,10 +288,11 @@ github_resolve_intent() {
     fi
     github_ri_ms='null'
     if printf '%s' "$github_ri_intent" | _jq -e '.milestone != null' >/dev/null; then
-        github_ri_list=$(github_rest_all "repos/$GH_REPO/milestones?state=all&per_page=100") || return $?
+        github_ri_list=$(github_rest_all "repos/$GH_ID_REPO/milestones?state=all&per_page=100") || return $?
         github_ri_want=$(printf '%s' "$github_ri_intent" | _jq -r .milestone)
         github_ri_ms=$(printf '%s' "$github_ri_list" | _jq -c --arg m "$github_ri_want" '
-            '"$BOARD_LIB"' [.[] | select(.title | ieq($m)) | .number] | first // "missing"')
+            '"$BOARD_LIB"'
+            [.[] | select(.title | ieq($m)) | .number] | first // "missing"')
         if [ "$github_ri_ms" = '"missing"' ]; then
             board_warn "no milestone '$github_ri_want'"
             return "$BOARD_EXIT_NOT_FOUND"
@@ -222,114 +303,186 @@ github_resolve_intent() {
         .assignees |= me | .add_assignees |= me | .remove_assignees |= me | .milestone_number = $ms'
 }
 
+# A repository owned by a user has no issue types, and the API drops --type without a word.
+# Usage: github_check_type <intent>
+github_check_type() {
+    github_ct_type=$(printf '%s' "$1" | _jq -r '.type // ""')
+    [ -n "$github_ct_type" ] || return 0
+    github_ct_doc=$(_jq -nc --arg repo "$GH_ID_REPO" '{owner: ($repo | split("/")[0]), name: ($repo | split("/")[1])}' |
+        github_query IssueTypes) || return $?
+    github_ct_have=$(printf '%s' "$github_ct_doc" | _jq -c '.repository.issueTypes.nodes // [] | map(.name)')
+    if [ "$github_ct_have" = '[]' ]; then
+        board_warn "repository $GH_ID_REPO has no issue types: they exist only in organisations"
+        return "$BOARD_EXIT_UNSUPPORTED"
+    fi
+    printf '%s' "$github_ct_have" | _jq -e --arg t "$github_ct_type" '
+        '"$BOARD_LIB"'
+        any(.[]; ieq($t))' >/dev/null ||
+        board_usage_die "no issue type '$github_ct_type': $GH_ID_REPO has $(printf '%s' "$github_ct_have" | _jq -r 'join(", ")')"
+}
+
 github_issue_create() {
     github_require_project
     github_ic_intent=$(cat)
+    GH_ID_REPO=$GH_REPO
+    GH_WROTE=''
     github_ic_intent=$(github_resolve_intent "$github_ic_intent") || return $?
+    github_check_type "$github_ic_intent" || return $?
+    github_plan "$github_ic_intent" || return $?
+    github_ic_parent=$(printf '%s' "$github_ic_intent" | _jq -r '.parent // ""')
+    github_ic_parent_node=''
+    if [ -n "$github_ic_parent" ]; then
+        github_ic_parent_node=$(github_node_of "$github_ic_parent") || return $?
+    fi
+    github_ic_meta=$(github_meta) || return $?
     github_ic_new=$(printf '%s' "$github_ic_intent" | _jq -c '
         {title, body: (.body // ""), assignees, labels}
         + (if .milestone_number then {milestone: .milestone_number} else {} end)
         + (if .type then {type: .type} else {} end)' | github_rest_body POST "repos/$GH_REPO/issues") || return $?
+    GH_WROTE=1
     github_ic_number=$(printf '%s' "$github_ic_new" | _jq -r .number)
     github_ic_node=$(printf '%s' "$github_ic_new" | _jq -r .node_id)
-    github_ic_meta=$(github_meta) || board_partial "$github_ic_number" "the issue exists, but the project could not be read"
     github_ic_item=$(printf '%s\n' "$github_ic_meta" | _jq -c --arg node "$github_ic_node" \
         '{projectId: .id, contentId: $node}' | github_query AddItem) ||
         board_partial "$github_ic_number" "the issue exists, but could not be added to the project"
     github_ic_item=$(printf '%s' "$github_ic_item" | _jq -r .addProjectV2ItemById.item.id)
-    github_apply_fields "$github_ic_item" "$github_ic_intent" ||
+    github_plan_apply "$github_ic_item" ||
         board_partial "$github_ic_number" "the issue exists, but a project field could not be set"
-    github_ic_parent=$(printf '%s' "$github_ic_intent" | _jq -r '.parent // ""')
-    if [ -n "$github_ic_parent" ]; then
-        github_ic_parent_node=$(github_node_of "$github_ic_parent") ||
-            board_partial "$github_ic_number" "the issue exists, but its parent could not be read"
+    if [ -n "$github_ic_parent_node" ]; then
         _jq -nc --arg i "$github_ic_parent_node" --arg s "$github_ic_node" '{issueId: $i, subIssueId: $s}' |
             github_query SetParent >/dev/null ||
             board_partial "$github_ic_number" "the issue exists, but its parent could not be set"
     fi
-    github_issue_view "$github_ic_number"
+    github_final_view "$github_ic_number"
+}
+
+# Removing what is not there succeeds, so a 404 here is fine. Sent by name, so one label's removal
+# never resends the others: an edit that did not touch a label cannot lose it.
+github_remove_label() {
+    github_rl_status=0
+    board_exec "$GH_CLI" api -X DELETE "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER/labels/$(board_urlencode "$1")" </dev/null ||
+        github_rl_status=$?
+    [ "$github_rl_status" != 0 ] || return 0
+    case $(board_err_line) in
+        *'HTTP 404'*) return 0 ;;
+    esac
+    github_check "$github_rl_status"
+}
+
+# Labels and assignees go through their own endpoints, for the same reason.
+# Usage: github_edit_people_and_labels <intent>
+github_edit_lists() {
+    if printf '%s' "$1" | _jq -e '.add_labels != []' >/dev/null; then
+        printf '%s' "$1" | _jq -c '{labels: .add_labels}' |
+            github_rest_body POST "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER/labels" >/dev/null || return $?
+        GH_WROTE=1
+    fi
+    printf '%s' "$1" | _jq -r '.remove_labels[]' >"$BOARD_TMP/remove-labels"
+    while IFS= read -r github_el_label; do
+        github_remove_label "$github_el_label" || return $?
+        GH_WROTE=1
+    done <"$BOARD_TMP/remove-labels"
+    if printf '%s' "$1" | _jq -e '.add_assignees != []' >/dev/null; then
+        printf '%s' "$1" | _jq -c '{assignees: .add_assignees}' |
+            github_rest_body POST "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER/assignees" >/dev/null || return $?
+        GH_WROTE=1
+    fi
+    if printf '%s' "$1" | _jq -e '.remove_assignees != []' >/dev/null; then
+        printf '%s' "$1" | _jq -c '{assignees: .remove_assignees}' |
+            github_rest_body DELETE "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER/assignees" >/dev/null || return $?
+        GH_WROTE=1
+    fi
 }
 
 github_issue_edit() {
     github_ie_id=$1
-    github_ie_patch='{}'
+    GH_WROTE=''
     github_ie_intent=$(cat)
     github_ie_raw=$(github_fetch "$github_ie_id") || return $?
     github_ids "$github_ie_raw" "$github_ie_id"
     github_ie_intent=$(github_resolve_intent "$github_ie_intent") || return $?
+    if [ -n "$GH_IS_DRAFT" ] && printf '%s' "$github_ie_intent" | _jq -e '
+        (.add_labels + .remove_labels + .add_assignees + .remove_assignees | length > 0)
+        or .milestone or .parent or .type or (.clear | index("milestone") or index("parent"))' >/dev/null; then
+        board_warn "a draft item takes only --title, --body and --status"
+        return "$BOARD_EXIT_UNSUPPORTED"
+    fi
+    github_check_type "$github_ie_intent" || return $?
+    github_plan "$github_ie_intent" || return $?
+    github_ie_parent=$(printf '%s' "$github_ie_intent" | _jq -r '.parent // ""')
+    github_ie_parent_node=''
+    if [ -n "$github_ie_parent" ]; then
+        github_ie_parent_node=$(github_node_of "$github_ie_parent") || return $?
+    fi
+    github_ie_clear_parent=''
+    if printf '%s' "$github_ie_intent" | _jq -e '.clear | index("parent")' >/dev/null; then
+        github_ie_clear_parent=$GH_PARENT_NODE
+    fi
+
     if [ -n "$GH_IS_DRAFT" ]; then
-        if printf '%s' "$github_ie_intent" | _jq -e '
-            (.add_labels + .remove_labels + .add_assignees + .remove_assignees + .clear | length > 0)
-            or .milestone or .parent or .type' >/dev/null; then
-            board_warn "a draft item takes only --title, --body and --status"
-            return "$BOARD_EXIT_UNSUPPORTED"
-        fi
         if printf '%s' "$github_ie_intent" | _jq -e '.title != null or .body != null' >/dev/null; then
             printf '%s' "$github_ie_intent" | _jq -c --arg id "$GH_NODE" \
-                '{input: ({draftIssueId: $id} + (if .title then {title} else {} end) + (if .body then {body} else {} end))}' |
+                '{input: ({draftIssueId: $id} + (if .title then {title} else {} end) + (if .body != null then {body} else {} end))}' |
                 github_query UpdateDraft >/dev/null || return $?
+            GH_WROTE=1
         fi
     else
-        github_ie_patch=$(printf '%s\n%s\n' "$github_ie_raw" "$github_ie_intent" | _jq -sc '
-            .[0].issue as $now | .[1] as $i
-            | ([$now.labels.nodes[].name] + $i.add_labels - $i.remove_labels | unique) as $labels
-            | ([$now.assignees.nodes[].login] + $i.add_assignees - $i.remove_assignees | unique) as $people
-            | {}
-            + (if $i.title then {title: $i.title} else {} end)
-            + (if $i.body != null then {body: $i.body} else {} end)
-            + (if $i.milestone_number then {milestone: $i.milestone_number}
-               elif ($i.clear | index("milestone")) then {milestone: null} else {} end)
-            + (if $i.type then {type: $i.type} else {} end)
-            + (if (($i.add_labels + $i.remove_labels) | length) > 0 then {labels: $labels} else {} end)
-            + (if (($i.add_assignees + $i.remove_assignees) | length) > 0 then {assignees: $people} else {} end)')
+        github_ie_patch=$(printf '%s' "$github_ie_intent" | _jq -c '
+            (if .title then {title} else {} end)
+            + (if .body != null then {body} else {} end)
+            + (if .milestone_number then {milestone: .milestone_number}
+               elif (.clear | index("milestone")) then {milestone: null} else {} end)
+            + (if .type then {type} else {} end)')
         if [ "$github_ie_patch" != '{}' ]; then
             printf '%s' "$github_ie_patch" |
                 github_rest_body PATCH "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER" >/dev/null || return $?
+            GH_WROTE=1
         fi
+        github_edit_lists "$github_ie_intent" || {
+            github_stop "$?" "$github_ie_id" "some fields changed, a label or assignee did not"
+            return $?
+        }
     fi
-    if printf '%s' "$github_ie_intent" | _jq -e '.status or .priority or .due or .sprint or ((.clear - ["milestone", "parent"]) | length > 0)' >/dev/null; then
-        if [ -z "$GH_ITEM" ]; then
-            github_ie_meta=$(github_meta) || return $?
-            GH_ITEM=$(printf '%s\n' "$github_ie_meta" | _jq -c --arg node "$GH_NODE" \
-                '{projectId: .id, contentId: $node}' | github_query AddItem) || return $?
-            GH_ITEM=$(printf '%s' "$GH_ITEM" | _jq -r .addProjectV2ItemById.item.id)
-        fi
-        github_ie_status=0
-        github_apply_fields "$GH_ITEM" "$github_ie_intent" || github_ie_status=$?
-        if [ "$github_ie_status" != 0 ]; then
-            [ "$github_ie_patch" != '{}' ] || return "$github_ie_status"
-            board_partial "$github_ie_id" "some fields changed, a project field did not"
-        fi
+    if [ "$GH_PLAN" != '[]' ]; then
+        github_ensure_item || {
+            github_stop "$?" "$github_ie_id" "some fields changed, the issue could not be added to the project"
+            return $?
+        }
+        github_plan_apply "$GH_ITEM" || {
+            github_stop "$?" "$github_ie_id" "some fields changed, a project field did not"
+            return $?
+        }
     fi
-    github_ie_parent=$(printf '%s' "$github_ie_intent" | _jq -r '.parent // ""')
-    if [ -n "$github_ie_parent" ]; then
-        github_ie_parent_node=$(github_node_of "$github_ie_parent") ||
-            board_partial "$github_ie_id" "some fields changed, the parent could not be read"
+    if [ -n "$github_ie_parent_node" ]; then
         _jq -nc --arg i "$github_ie_parent_node" --arg s "$GH_NODE" '{issueId: $i, subIssueId: $s}' |
-            github_query SetParent >/dev/null || board_partial "$github_ie_id" "some fields changed, the parent could not be set"
-    elif printf '%s' "$github_ie_intent" | _jq -e '.clear | index("parent")' >/dev/null && [ -n "$GH_PARENT_NODE" ]; then
-        _jq -nc --arg i "$GH_PARENT_NODE" --arg s "$GH_NODE" '{issueId: $i, subIssueId: $s}' |
-            github_query ClearParent >/dev/null || board_partial "$github_ie_id" "some fields changed, the parent could not be cleared"
+            github_query SetParent >/dev/null || {
+            github_stop "$?" "$github_ie_id" "some fields changed, the parent could not be set"
+            return $?
+        }
+        GH_WROTE=1
+    elif [ -n "$github_ie_clear_parent" ]; then
+        _jq -nc --arg i "$github_ie_clear_parent" --arg s "$GH_NODE" '{issueId: $i, subIssueId: $s}' |
+            github_query ClearParent >/dev/null || {
+            github_stop "$?" "$github_ie_id" "some fields changed, the parent could not be cleared"
+            return $?
+        }
+        GH_WROTE=1
     fi
-    github_issue_view "$github_ie_id"
-}
-
-# Makes sure the issue has an item here, leaving it in GH_ITEM.
-github_ensure_item() {
-    github_ei_raw=$(github_fetch "$1") || return $?
-    github_ids "$github_ei_raw" "$1"
-    if [ -z "$GH_ITEM" ]; then
-        github_ei_meta=$(github_meta) || return $?
-        GH_ITEM=$(printf '%s\n' "$github_ei_meta" | _jq -c --arg node "$GH_NODE" \
-            '{projectId: .id, contentId: $node}' | github_query AddItem) || return $?
-        GH_ITEM=$(printf '%s' "$GH_ITEM" | _jq -r .addProjectV2ItemById.item.id)
-    fi
+    github_final_view "$github_ie_id"
 }
 
 github_issue_move() {
-    github_ensure_item "$1" || return $?
-    github_set_status "$GH_ITEM" "$2" || return $?
-    github_issue_view "$1"
+    GH_WROTE=''
+    github_im_raw=$(github_fetch "$1") || return $?
+    github_ids "$github_im_raw" "$1"
+    GH_PLAN='[]'
+    github_plan_option Status "$2" || return $?
+    github_ensure_item || return $?
+    github_plan_apply "$GH_ITEM" || {
+        github_stop "$?" "$1" "the issue was added to the project, but its status could not be set"
+        return $?
+    }
+    github_final_view "$1"
 }
 
 # The first status of a category, in project order, or nothing.
@@ -340,35 +493,68 @@ github_status_in() {
 }
 
 github_issue_close() {
-    github_ensure_item "$1" || return $?
-    github_ic_status=$(github_status_in "$2") || return $?
+    GH_WROTE=''
+    github_cl_raw=$(github_fetch "$1") || return $?
+    github_ids "$github_cl_raw" "$1"
+    github_cl_status=$(github_status_in "$2") || return $?
+    [ -n "$github_cl_status" ] || board_usage_die "no status has category $2: declare one in [board.statuses]"
+    GH_PLAN='[]'
+    github_plan_option Status "$github_cl_status" || return $?
     if [ -z "$GH_IS_DRAFT" ]; then
-        github_ic_reason=completed
-        [ "$2" = done ] || github_ic_reason=not_planned
-        _jq -nc --arg r "$github_ic_reason" '{state: "closed", state_reason: $r}' |
+        github_cl_reason=completed
+        [ "$2" = done ] || github_cl_reason=not_planned
+        _jq -nc --arg r "$github_cl_reason" '{state: "closed", state_reason: $r}' |
             github_rest_body PATCH "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER" >/dev/null || return $?
+        GH_WROTE=1
     fi
-    if [ -n "$github_ic_status" ]; then
-        github_set_status "$GH_ITEM" "$github_ic_status" || board_partial "$1" "closed, but the status could not be set"
-    elif [ -n "$GH_IS_DRAFT" ]; then
-        board_usage_die "no status has category $2: declare one in [board.statuses]"
-    fi
-    github_issue_view "$1"
+    github_ensure_item || {
+        github_stop "$?" "$1" "closed, but the issue could not be added to the project"
+        return $?
+    }
+    github_plan_apply "$GH_ITEM" || {
+        github_stop "$?" "$1" "closed, but the status could not be set"
+        return $?
+    }
+    github_final_view "$1"
 }
 
 github_issue_reopen() {
-    github_ensure_item "$1" || return $?
-    github_ir_status=$2
-    github_ir_closed=$(printf '%s' "$github_ei_raw" | _jq -r '.issue.state // "OPEN"')
-    if [ "$github_ir_closed" = CLOSED ]; then
-        printf '{"state":"open"}' | github_rest_body PATCH "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER" >/dev/null || return $?
+    GH_WROTE=''
+    github_ro_raw=$(github_fetch "$1") || return $?
+    github_ids "$github_ro_raw" "$1"
+    github_ro_status=$2
+    github_ro_closed=$GH_IS_CLOSED
+    if [ -n "$GH_IS_DRAFT" ]; then
+        # A draft has no closed state: its status is all there is.
+        github_ro_category=$(printf '%s' "$github_ro_raw" | github_normalise | _jq -r '.status.category // ""')
+        case $github_ro_category in
+            'done' | canceled) github_ro_closed=1 ;;
+        esac
+    fi
+    if [ -n "$github_ro_closed" ] && [ -z "$github_ro_status" ]; then
         # A reopened issue keeps Done on the project: no workflow moves it back.
-        [ -n "$github_ir_status" ] || github_ir_status=$(github_status_in todo) || return $?
+        github_ro_status=$(github_status_in todo) || return $?
     fi
-    if [ -n "$github_ir_status" ]; then
-        github_set_status "$GH_ITEM" "$github_ir_status" || board_partial "$1" "reopened, but the status could not be set"
+    GH_PLAN='[]'
+    if [ -n "$github_ro_status" ]; then
+        github_plan_option Status "$github_ro_status" || return $?
     fi
-    github_issue_view "$1"
+    if [ -n "$GH_IS_CLOSED" ]; then
+        printf '{"state":"open"}' |
+            github_rest_body PATCH "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER" >/dev/null || return $?
+        GH_WROTE=1
+    fi
+    if [ "$GH_PLAN" != '[]' ]; then
+        github_ensure_item || {
+            github_stop "$?" "$1" "reopened, but the issue could not be added to the project"
+            return $?
+        }
+        github_plan_apply "$GH_ITEM" || {
+            github_stop "$?" "$1" "reopened, but the status could not be set"
+            return $?
+        }
+    fi
+    github_final_view "$1"
 }
 
 github_issue_delete() {
@@ -385,12 +571,17 @@ github_issue_delete() {
 
 # --- comments ----------------------------------------------------------------------------
 
+# Leaves the issue in GH_ID_REPO and GH_ID_NUMBER. A PVTI_ id needs a read to learn them.
 github_comment_target() {
     github_require_project
     github_parse_id "$1"
     if [ -n "$GH_ID_ITEM" ]; then
-        board_warn "a draft item has no comments"
-        return "$BOARD_EXIT_UNSUPPORTED"
+        github_ct_raw=$(github_fetch "$1") || return $?
+        github_ids "$github_ct_raw" "$1"
+        if [ -n "$GH_IS_DRAFT" ]; then
+            board_warn "a draft item has no comments"
+            return "$BOARD_EXIT_UNSUPPORTED"
+        fi
     fi
 }
 
@@ -424,51 +615,55 @@ github_issue_link_list() {
     printf '%s' "$github_ll_doc" | github_normalise | _jq -c .links
 }
 
-# Usage: github_link_nodes <id> <other> <type>  — sets GH_BLOCKED and GH_BLOCKER.
-github_link_nodes() {
-    github_ln_a=$(github_node_of "$1") || return $?
-    github_ln_b=$(github_node_of "$2") || return $?
-    [ -n "$github_ln_a" ] && [ -n "$github_ln_b" ] || {
-        board_warn "a draft item cannot be linked"
-        return "$BOARD_EXIT_UNSUPPORTED"
-    }
-    if [ "$3" = blocks ]; then
-        GH_BLOCKED=$github_ln_b GH_BLOCKER=$github_ln_a
-    else
-        GH_BLOCKED=$github_ln_a GH_BLOCKER=$github_ln_b
-    fi
+# Usage: github_link_sides <id> <other> <type>
+# Sets GH_LINK_MUTATION inputs: GH_LINK_A and GH_LINK_B, read as "B blocks A", and whether the link
+# exists already, in GH_LINK_EXISTS. Linking twice must succeed, and the API refuses it.
+github_link_sides() {
+    github_ls_a=$(github_node_of "$1") || return $?
+    github_ls_b=$(github_node_of "$2") || return $?
+    case $3 in
+        blocks)
+            GH_LINK_A=$github_ls_b GH_LINK_B=$github_ls_a
+            github_ls_read=$2
+            ;;
+        *)
+            GH_LINK_A=$github_ls_a GH_LINK_B=$github_ls_b
+            github_ls_read=$1
+            ;;
+    esac
+    github_ls_raw=$(github_fetch "$github_ls_read") || return $?
+    GH_LINK_EXISTS=$(printf '%s' "$github_ls_raw" | _jq -r --arg t "$3" --arg b "$GH_LINK_B" '
+        (.issue // .item.content) as $i
+        | (if $t == "relates" then [($i.relatesTo.nodes // [])[].id]
+           elif $t == "duplicates" then [$i.duplicateOf.id // empty]
+           else [($i.blockedBy.nodes // [])[].id] end)
+        | index($b) != null')
+}
+
+github_link_input() {
+    _jq -nc --arg a "$GH_LINK_A" --arg b "$GH_LINK_B" "{$1: \$a, $2: \$b}"
 }
 
 github_issue_link_add() {
-    case $3 in
-        relates)
-            board_warn "GitHub has no way to set a relates link"
-            return "$BOARD_EXIT_UNSUPPORTED"
-            ;;
-        duplicates)
-            github_la_a=$(github_node_of "$1") || return $?
-            github_la_b=$(github_node_of "$2") || return $?
-            _jq -nc --arg i "$github_la_a" --arg d "$github_la_b" '{issueId: $i, duplicateIssueId: $d}' |
-                github_query CloseDuplicate >/dev/null || return $?
-            ;;
-        *)
-            github_link_nodes "$1" "$2" "$3" || return $?
-            _jq -nc --arg i "$GH_BLOCKED" --arg b "$GH_BLOCKER" '{issueId: $i, blockingIssueId: $b}' |
-                github_query AddBlock >/dev/null || return $?
-            ;;
-    esac
-    github_issue_view "$1"
+    github_link_sides "$1" "$2" "$3" || return $?
+    if [ "$GH_LINK_EXISTS" != true ]; then
+        case $3 in
+            relates) github_link_input issueId relatedIssueId | github_query AddRelates >/dev/null || return $? ;;
+            duplicates) github_link_input issueId duplicateIssueId | github_query CloseDuplicate >/dev/null || return $? ;;
+            *) github_link_input issueId blockingIssueId | github_query AddBlock >/dev/null || return $? ;;
+        esac
+    fi
+    github_issue_view "$1" || board_partial "$1" "linked, but the issue could not be read back"
 }
 
 github_issue_link_remove() {
-    case $3 in
-        relates | duplicates)
-            board_warn "GitHub has no way to remove a $3 link"
-            return "$BOARD_EXIT_UNSUPPORTED"
-            ;;
-    esac
-    github_link_nodes "$1" "$2" "$3" || return $?
-    _jq -nc --arg i "$GH_BLOCKED" --arg b "$GH_BLOCKER" '{issueId: $i, blockingIssueId: $b}' |
-        github_query RemoveBlock >/dev/null || return $?
-    github_issue_view "$1"
+    github_link_sides "$1" "$2" "$3" || return $?
+    if [ "$GH_LINK_EXISTS" = true ]; then
+        case $3 in
+            relates) github_link_input issueId relatedIssueId | github_query RemoveRelates >/dev/null || return $? ;;
+            duplicates) github_link_input duplicateId canonicalId | github_query UnmarkDuplicate >/dev/null || return $? ;;
+            *) github_link_input issueId blockingIssueId | github_query RemoveBlock >/dev/null || return $? ;;
+        esac
+    fi
+    github_issue_view "$1" || board_partial "$1" "unlinked, but the issue could not be read back"
 }

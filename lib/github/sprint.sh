@@ -2,6 +2,7 @@
 
 # Iterations of the field named in [board.target] sprint_field, newest first.
 github_sprints() {
+    github_env
     [ -n "$GH_SPRINT_FIELD" ] || {
         board_warn "declare [board.target] sprint_field: the name of the project's iteration field"
         return "$BOARD_EXIT_UNSUPPORTED"

@@ -3,6 +3,8 @@
 # GitHub adapter: transport, classification and the board-level calls. The board is a Projects v2
 # project; [board] url names the repository new issues go to.
 
+GH_READY=''
+
 github_env() {
     [ -z "${GH_READY:-}" ] || return 0
     GH_CLI=gh
@@ -65,8 +67,12 @@ github_gql() {
 }
 
 # Usage: <variables JSON on stdin> | github_query <Name>
-# The name is a file in lib/github/queries. Variables stay on stdin, so a body fits.
+# The name is a file in lib/github/queries. Variables stay on stdin, so a body fits. A timed-out
+# read is a plain failure even in a command that writes: only a mutation has an unknown result.
 github_query() {
+    IFS=' (' read -r github_qr_kind _ <"$BOARD_HOME/lib/github/queries/$1.graphql"
+    BOARD_WRITE=''
+    [ "$github_qr_kind" != mutation ] || BOARD_WRITE=1
     _jq -c --rawfile q "$BOARD_HOME/lib/github/queries/$1.graphql" \
         --rawfile f "$BOARD_HOME/lib/github/queries/fragments.graphql" \
         '{query: ($q + (if ($q | test("\\.\\.\\.(Issue|Item)Fields")) then $f else "" end)), variables: .}' |
@@ -83,6 +89,8 @@ github_field_vars() {
 # Usage: github_rest <method> <path>  — no body.
 github_rest() {
     github_rs_status=0
+    BOARD_WRITE=''
+    [ "$1" = GET ] || BOARD_WRITE=1
     board_exec "$GH_CLI" api -X "$1" "$2" </dev/null || github_rs_status=$?
     github_check "$github_rs_status" || return $?
     board_record "$(board_rest_key "$1" "$2")"
@@ -92,6 +100,7 @@ github_rest() {
 # Usage: <JSON body on stdin> | github_rest_body <method> <path>
 github_rest_body() {
     github_rs_status=0
+    BOARD_WRITE=1
     board_exec "$GH_CLI" api -X "$1" "$2" --input - || github_rs_status=$?
     github_check "$github_rs_status" || return $?
     cat "$BOARD_OUT"
@@ -100,6 +109,7 @@ github_rest_body() {
 # Usage: github_rest_all <path>  — every page, as one array.
 github_rest_all() {
     github_rs_status=0
+    BOARD_WRITE=''
     board_exec "$GH_CLI" api "$1" --paginate --slurp </dev/null || github_rs_status=$?
     github_check "$github_rs_status" || return $?
     board_record "$(board_rest_key GET "$1")"
@@ -206,6 +216,10 @@ github_init_discover() {
     github_id_path=${1#*://}
     github_id_host=${github_id_path%%/*}
     github_id_path=${github_id_path#*/}
+    if [ "$github_id_host" != github.com ]; then
+        GH_HOST=$github_id_host
+        export GH_HOST
+    fi
     case $github_id_path in
         users/*/projects/* | orgs/*/projects/*)
             github_id_rest=${github_id_path#*/}

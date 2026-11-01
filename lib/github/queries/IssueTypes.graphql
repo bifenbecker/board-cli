@@ -1,0 +1,5 @@
+query IssueTypes($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    issueTypes(first: 30) { nodes { name } }
+  }
+}

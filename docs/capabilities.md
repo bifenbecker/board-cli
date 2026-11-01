@@ -16,7 +16,7 @@ a board cannot do exits 3. "Declared" means it needs a table in `[board.*]` of `
 | due date                           | yes           | yes           | declared                | yes                    |
 | type                               | no            | yes           | organisations only      | yes                    |
 | parent, subtasks                   | yes           | yes           | yes                     | yes                    |
-| link relates                       | yes           | yes           | read only               | yes                    |
+| link relates                       | yes           | yes           | yes                     | yes                    |
 | link blocks                        | yes           | yes           | yes                     | Premium                |
 | link duplicates                    | yes           | yes           | yes                     | no                     |
 | sprint read and assign             | yes           | scrum boards  | declared                | Premium                |

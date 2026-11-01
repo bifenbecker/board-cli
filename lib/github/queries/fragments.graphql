@@ -12,13 +12,15 @@ fragment IssueFields on Issue {
   repository { nameWithOwner }
   author { login ... on User { name } }
   assignees(first: 20) { nodes { login name } }
-  labels(first: 50) { nodes { name } }
+  labels(first: 100) { nodes { name } }
   milestone { title }
   issueType { name }
   parent { id number repository { nameWithOwner } }
   subIssues(first: 50) { nodes { number repository { nameWithOwner } } }
-  blockedBy(first: 20) { nodes { number repository { nameWithOwner } } }
-  blocking(first: 20) { nodes { number repository { nameWithOwner } } }
+  blockedBy(first: 20) { nodes { id number repository { nameWithOwner } } }
+  blocking(first: 20) { nodes { id number repository { nameWithOwner } } }
+  relatesTo(first: 20) { nodes { id number repository { nameWithOwner } } }
+  duplicateOf { id number repository { nameWithOwner } }
 }
 
 fragment ItemFields on ProjectV2Item {

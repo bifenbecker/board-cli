@@ -1,0 +1,3 @@
+mutation AddRelates($issueId: ID!, $relatedIssueId: ID!) {
+  addRelatesTo(input: {issueId: $issueId, relatedIssueId: $relatedIssueId}) { clientMutationId }
+}

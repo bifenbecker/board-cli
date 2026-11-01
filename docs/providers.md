@@ -12,6 +12,8 @@ Test targets: Linear workspace `3kd` (team `3KD`, project `Test`), Jira Cloud pr
 - Git Bash: a native exe cannot open a `/c/...` path once `MSYS_NO_PATHCONV=1` is set, and it never
   can open a `/tmp/...` one. Keep paths away from native exes: use shell redirects.
 - Windows `jq` writes CRLF without `-b`. A `\r` in a variable breaks every later comparison.
+- Windows `jq` reads `env.X` in the ANSI code page: Cyrillic comes out as `??????`. Values go in
+  with `--arg`.
 - `$(...)` strips trailing newlines, so a description loses its trailing blank lines.
 - Argument length stops at about 32,000 characters on Windows. Bodies go through stdin.
 
@@ -34,6 +36,14 @@ Tool: `gh`, tested on 2.96.0. Needs the `project` scope.
 - `items(query:"status:Done")` filters on the server and `totalCount` follows the filter.
 - A failed GraphQL query exits 1 and prints JSON on stdout, with `errors[].type` (`NOT_FOUND`).
 - `gh project item-list --limit` truncates silently. Use GraphQL.
+- The project query language has wildcards (`*`), OR (`,`) and no working escape for `"`, and its
+  free text reads `status:Done` as a qualifier and never searches the body. Use it to cut pages,
+  and decide on the client.
+- `POSITION` is the only order of project items.
+- A PATCH with `labels` replaces the set from a read that may be stale. Add and remove through
+  their own endpoints. `DELETE .../labels/<name>` answers 404 for a label the issue lacks.
+- REST `type` is dropped without a word on a repository with no issue types (all user-owned ones).
+- `labels(first:)` and the like stop at 100, and a read that stops early looks complete.
 
 ## GitLab
 

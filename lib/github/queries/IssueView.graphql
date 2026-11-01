@@ -2,8 +2,11 @@ query IssueView($owner: String!, $name: String!, $number: Int!, $priorityField: 
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       ...IssueFields
-      projectItems(first: 20, includeArchived: false) {
-        nodes { ...ItemFields project { id number } }
+      projectItems(first: 20, includeArchived: true) {
+        nodes {
+          ...ItemFields
+          project { id number owner { ... on User { login } ... on Organization { login } } }
+        }
       }
     }
   }
