@@ -41,3 +41,17 @@ board_paged() {
     fi
     _jq -sc --argjson n "$board_pg_limit" '.[:$n]' <"$board_pg_file"
 }
+
+# Cuts a list read in one go to --limit, with the warning a truncated list owes.
+# Usage: <JSON array on stdin> | board_cut <limit|all>
+board_cut() {
+    board_ct_doc=$(cat)
+    if [ "$1" = all ]; then
+        printf '%s' "$board_ct_doc"
+        return 0
+    fi
+    if [ "$(printf '%s' "$board_ct_doc" | _jq 'length')" -gt "$1" ]; then
+        board_warn "showing the first $1; more exist: raise --limit, or pass --limit all"
+    fi
+    printf '%s' "$board_ct_doc" | _jq -c --argjson n "$1" '.[:$n]'
+}

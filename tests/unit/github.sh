@@ -288,3 +288,11 @@ test_inherited_ready_flag_changes_nothing() {
     t_run board issue view 11 --jq .id
     t_status 0
 }
+
+test_a_comment_of_another_issue_is_not_found() {
+    gh_board
+    printf '{"id":5,"issue_url":"https://api.github.com/repos/a/b/issues/9"}' >"$FAKE_OVERRIDE/GET_repos_a_b_issues_comments_5.json"
+    t_run board issue comment delete 11 5 --yes
+    t_status 4
+    t_lacks "$(gh_log)" 'DELETE' log
+}
