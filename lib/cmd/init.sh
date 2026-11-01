@@ -9,10 +9,10 @@ USAGE
   board init --url <board-url> [--kind <kind>] [--repo <owner/repo>] [--dry-run]
 
 DESCRIPTION
-  Reads the board behind a URL and writes [board] of workflow.toml, so every other command knows
-  it. The file is created when missing. An existing file keeps everything it has: sections are
-  only added, and when [board] already says something else, nothing is written and exit 2 prints
-  the section to merge by hand.
+  Reads the board behind a URL and writes [board] of workflow.toml in the working directory, or of
+  WORKFLOW_FILE, so every other command knows it. The file is created when missing. An existing
+  file keeps everything it has: sections are only added, and when [board] already says something
+  else, nothing is written and exit 2 prints the section to merge by hand, on stderr.
 
   Statuses found on the board are written to [board.statuses] with a category guessed from their
   name. Check them: a status board could not place stays commented out, and 'board doctor' fails
@@ -59,18 +59,18 @@ init_section() {
          else empty end)'
 }
 
-# True when the file has this section header, whether or not it holds a key. An empty one counts:
-# adding a second would make the file invalid TOML.
+# True when the file has this section, whether or not it holds a key: a second one would make the
+# file invalid TOML. Asks the parser, which also knows [ board ] and statuses.Todo = "todo".
 init_has_section() {
-    grep -Eq "^[[:space:]]*\\[$1\\][[:space:]]*(#.*)?\$" "$init_file"
+    printf '%s' "$init_have" | _jq -e --arg s "$1" '._sections | index($s) != null' >/dev/null
 }
 
 # Prints the subsections of the discovered board that the file lacks.
 init_missing_sections() {
     init_ms_target=false
     init_ms_statuses=false
-    if init_has_section 'board\.target'; then init_ms_target=true; fi
-    if init_has_section 'board\.statuses'; then init_ms_statuses=true; fi
+    if init_has_section target; then init_ms_target=true; fi
+    if init_has_section statuses; then init_ms_statuses=true; fi
     printf '%s' "$init_doc" | _jq -c --argjson t "$init_ms_target" --argjson s "$init_ms_statuses" '
         {board: {}} + (if $t then {} else {target} end) + (if $s then {} else {statuses, unplaced} end)' |
         init_section | sed '1d'
@@ -95,42 +95,37 @@ cmd_init() {
     esac
     board_kind_select "$opt_kind" "$opt_url"
 
-    init_doc=$(board_call_kind init_discover "$opt_url" "$opt_repo") || exit $?
-    init_text=$(printf '%s' "$init_doc" | init_section)
+    init_doc=$(board_call_kind init_discover "$opt_url" "$opt_repo") || board_fail "$?" "$init_doc"
+    [ -n "$init_doc" ] || board_die "the board gave no answer"
+    init_text=$(printf '%s' "$init_doc" | init_section) || board_die "the board gave an answer that cannot be read"
 
-    if [ -n "${WORKFLOW_FILE:-}" ]; then
-        init_file=$WORKFLOW_FILE
-    elif ! init_file=$(board_config_find 2>/dev/null); then
-        init_file=workflow.toml
-    fi
-    init_written=true
-    if [ -n "$opt_dry_run" ]; then
-        init_written=false
-    elif [ ! -f "$init_file" ]; then
-        printf '%s\n' "$init_text" >"$init_file"
-    else
-        init_have=$(board_toml_to_json <"$init_file")
+    init_file=${WORKFLOW_FILE:-workflow.toml}
+    init_have='{"_sections":[]}'
+    init_extra=$(printf '%s' "$init_text")
+    if [ -f "$init_file" ]; then
+        init_have=$(board_toml_to_json <"$init_file") || board_usage_die "$init_file cannot be read: nothing written"
         init_conflict=$(printf '%s\n%s\n' "$init_have" "$init_doc" | _jq -sr '
             .[0] as $have | .[1].board | to_entries
             | map(select($have[.key] != null and $have[.key] != .value) | .key) | join(", ")')
-        if [ -z "$init_conflict" ] && init_has_section board &&
+        if [ -z "$init_conflict" ] && init_has_section '' &&
             ! printf '%s' "$init_have" | _jq -e '.kind and .url' >/dev/null; then
             init_conflict='it lacks kind or url'
         fi
         if [ -n "$init_conflict" ]; then
-            printf '%s\n' "$init_text"
+            printf '%s\n' "$init_text" >&2
             board_usage_die "$init_file declares another board ($init_conflict): nothing written, merge the section above by hand"
         fi
-        if init_has_section board; then
+        if init_has_section ''; then
             init_extra=$(init_missing_sections)
         else
             init_extra=$(printf '\n%s' "$init_text")
         fi
-        if [ -n "$(printf '%s' "$init_extra" | tr -d '[:space:]')" ]; then
-            printf '%s\n' "$init_extra" >>"$init_file"
-        else
-            init_written=false
-        fi
+    fi
+
+    init_written=false
+    if [ -z "$opt_dry_run" ] && [ -n "$(printf '%s' "$init_extra" | tr -d '[:space:]')" ]; then
+        printf '%s\n' "$init_extra" >>"$init_file"
+        init_written=true
     fi
 
     if board_json_mode; then

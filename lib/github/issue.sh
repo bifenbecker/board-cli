@@ -42,7 +42,7 @@ github_fetch() {
 # The raw answer of github_fetch into a normalised issue.
 github_normalise() {
     _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg repo "$GH_REPO" --argjson number "$GH_NUMBER" '
-        include "github/shape";
+        '"$BOARD_LIB"'
         if .item then (.item | gh_item($cfg; $repo)) else (.issue | gh_issue($cfg; $repo; $number)) end'
 }
 
@@ -54,7 +54,7 @@ github_ids() {
         (if .item then (.item.content // {}) else .issue end) as $c
         | (if .item then .item.id
            else ([.issue.projectItems.nodes[] | select(.project.number == $number)] | first | .id // "") end) as $item
-        | @sh "GH_NODE=\($c.id // "") GH_ITEM=\($item) GH_IS_DRAFT=\(if .item and ($c.__typename != "Issue") then "1" else "" end) GH_PARENT_NODE=\($c.parent.id // "")"')"
+        | @sh "GH_NODE=\($c.id // "" | tostring) GH_ITEM=\($item | tostring) GH_IS_DRAFT=\(if .item and ($c.__typename != "Issue") then "1" else "" end) GH_PARENT_NODE=\($c.parent.id // "" | tostring)"')"
 }
 
 github_issue_view() {
@@ -75,7 +75,7 @@ github_list_page() {
         '. + {after: (if $after == "" then null else $after end)}' | github_field_vars | github_query BoardItems) || return $?
     printf '%s' "$github_lp_doc" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg repo "$GH_REPO" \
         --argjson filter "$GH_LIST_FILTER" '
-        include "github/shape";
+        '"$BOARD_LIB"'
         .repositoryOwner.projectV2.items as $page
         | {has_next: $page.pageInfo.hasNextPage, end_cursor: $page.pageInfo.endCursor,
            nodes: [$page.nodes[] | select(.isArchived | not) | select(.content != null)
@@ -93,7 +93,7 @@ github_issue_list() {
         'if .assignee == "@me" then .assignee = $me else . end')
     GH_LIST_VARS=$(printf '%s' "$GH_LIST_FILTER" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" \
         --arg owner "$GH_OWNER" --argjson number "$GH_NUMBER" '
-        include "github/shape";
+        '"$BOARD_LIB"'
         {owner: $owner, number: $number, first: 100, query: gh_filter_query($cfg)}')
     github_il_limit=$(printf '%s' "$GH_LIST_FILTER" | _jq -r '.limit // "all"')
     board_paged github_list_page "$github_il_limit"
@@ -118,7 +118,7 @@ github_set_status() {
 github_clear_field() {
     github_cf_meta=$(github_meta) || return $?
     github_cf_field=$(printf '%s' "$github_cf_meta" | _jq -r --arg f "$2" '
-        include "jq/common"; [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
+        '"$BOARD_LIB"' [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
     [ -n "$github_cf_field" ] || {
         board_warn "this project has no field '$2'"
         return "$BOARD_EXIT_UNSUPPORTED"
@@ -148,7 +148,7 @@ github_apply_fields() {
     if [ -n "$github_af_due" ]; then
         github_af_meta=$(github_meta) || return $?
         github_af_field=$(printf '%s' "$github_af_meta" | _jq -r --arg f "$GH_DUE_FIELD" '
-            include "jq/common"; [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
+            '"$BOARD_LIB"' [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
         [ -n "$github_af_field" ] || {
             board_warn "this project has no date field '$GH_DUE_FIELD': add one, or set [board.target] due_field"
             return "$BOARD_EXIT_UNSUPPORTED"
@@ -176,7 +176,7 @@ github_sprint_field_id() {
     }
     github_sp_meta=$(github_meta) || return $?
     GH_SPRINT_FIELD_ID=$(printf '%s' "$github_sp_meta" | _jq -r --arg f "$GH_SPRINT_FIELD" '
-        include "jq/common"; [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
+        '"$BOARD_LIB"' [.fields.nodes[] | select(.name != null) | select(.name | ieq($f)) | .id] | first // ""')
     [ -n "$GH_SPRINT_FIELD_ID" ] || {
         board_warn "this project has no field '$GH_SPRINT_FIELD'"
         return "$BOARD_EXIT_UNSUPPORTED"
@@ -188,7 +188,7 @@ github_iteration_id() {
     board_provider_load sprint
     github_it_doc=$(github_sprints) || return $?
     github_it_id=$(printf '%s' "$github_it_doc" | _jq -r --arg want "$1" '
-        include "jq/common";
+        '"$BOARD_LIB"'
         [.[] | select(if $want == "current" then .state == "active" else (.name | ieq($want)) end) | .id] | first // ""')
     [ -n "$github_it_id" ] || {
         board_warn "no sprint '$1'"
@@ -211,7 +211,7 @@ github_resolve_intent() {
         github_ri_list=$(github_rest_all "repos/$GH_REPO/milestones?state=all&per_page=100") || return $?
         github_ri_want=$(printf '%s' "$github_ri_intent" | _jq -r .milestone)
         github_ri_ms=$(printf '%s' "$github_ri_list" | _jq -c --arg m "$github_ri_want" '
-            include "jq/common"; [.[] | select(.title | ieq($m)) | .number] | first // "missing"')
+            '"$BOARD_LIB"' [.[] | select(.title | ieq($m)) | .number] | first // "missing"')
         if [ "$github_ri_ms" = '"missing"' ]; then
             board_warn "no milestone '$github_ri_want'"
             return "$BOARD_EXIT_NOT_FOUND"
@@ -397,19 +397,19 @@ github_comment_target() {
 github_issue_comment_list() {
     github_comment_target "$1" || return $?
     github_cl_doc=$(github_rest_all "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER/comments?per_page=100") || return $?
-    printf '%s' "$github_cl_doc" | _jq -c 'include "github/shape"; map(gh_comment)'
+    printf '%s' "$github_cl_doc" | _jq -c ''"$BOARD_LIB"' map(gh_comment)'
 }
 
 github_issue_comment_add() {
     github_comment_target "$1" || return $?
     github_ca_doc=$(github_rest_body POST "repos/$GH_ID_REPO/issues/$GH_ID_NUMBER/comments") || return $?
-    printf '%s' "$github_ca_doc" | _jq -c 'include "github/shape"; gh_comment'
+    printf '%s' "$github_ca_doc" | _jq -c ''"$BOARD_LIB"' gh_comment'
 }
 
 github_issue_comment_edit() {
     github_comment_target "$1" || return $?
     github_ce_doc=$(github_rest_body PATCH "repos/$GH_ID_REPO/issues/comments/$2") || return $?
-    printf '%s' "$github_ce_doc" | _jq -c 'include "github/shape"; gh_comment'
+    printf '%s' "$github_ce_doc" | _jq -c ''"$BOARD_LIB"' gh_comment'
 }
 
 github_issue_comment_delete() {

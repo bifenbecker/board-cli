@@ -8,7 +8,7 @@ github_sprints() {
     }
     github_sp_meta=$(github_meta) || return $?
     github_sp_doc=$(printf '%s' "$github_sp_meta" | _jq -c --arg f "$GH_SPRINT_FIELD" --arg today "$(date -u +%Y-%m-%d)" '
-        include "jq/common";
+        '"$BOARD_LIB"'
         [.fields.nodes[] | select(.name != null) | select(.name | ieq($f))] | first
         | if .configuration == null then null else
           def end_of: (.startDate + "T00:00:00Z" | fromdateiso8601) + (.duration * 86400) - 86400 | todate | .[0:10];

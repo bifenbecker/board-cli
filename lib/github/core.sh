@@ -5,7 +5,7 @@
 
 github_env() {
     [ -z "${GH_READY:-}" ] || return 0
-    GH_CLI=${BOARD_CLI:-gh}
+    GH_CLI=gh
     if [ -n "${BOARD_URL:-}" ]; then
         GH_REPO=${BOARD_URL#*://}
         GH_REPO=${GH_REPO#*/}
@@ -16,8 +16,10 @@ github_env() {
             export GH_HOST
         fi
         eval "$(printf '%s' "$BOARD_CONFIG_JSON" | _jq -r '
-            @sh "GH_OWNER=\(.target.owner // "") GH_NUMBER=\(.target.number // "")",
-            @sh "GH_PRIORITY_FIELD=\(.target.priority_field // "Priority") GH_DUE_FIELD=\(.target.due_field // "Due date") GH_SPRINT_FIELD=\(.target.sprint_field // "")"')"
+            def s($d): . // $d | tostring;
+            .target as $t
+            | @sh "GH_OWNER=\($t.owner | s("")) GH_NUMBER=\($t.number | s(""))",
+              @sh "GH_PRIORITY_FIELD=\($t.priority_field | s("Priority")) GH_DUE_FIELD=\($t.due_field | s("Due date")) GH_SPRINT_FIELD=\($t.sprint_field | s(""))"')"
     fi
     GH_READY=1
 }
@@ -26,6 +28,7 @@ github_require_project() {
     github_env
     [ -n "$GH_OWNER" ] && [ -n "$GH_NUMBER" ] ||
         board_usage_die "[board.target] needs owner and number: the GitHub project this board is"
+    board_require_int "[board.target] number" "$GH_NUMBER"
 }
 
 # What a failed call means. stdout holds the JSON answer, stderr the tool's own line.
@@ -125,7 +128,7 @@ github_meta() {
 github_option() {
     github_op_meta=$(github_meta) || return $?
     github_op_doc=$(printf '%s' "$github_op_meta" | _jq -c --arg f "$1" --arg o "$2" '
-        include "jq/common";
+        '"$BOARD_LIB"'
         [.fields.nodes[] | select(.name != null) | select(.name | ieq($f))] | first
         | if . == null then {missing: "field"}
           else . as $field
@@ -159,7 +162,7 @@ github_doctor_checks() {
     github_env
     github_dc_meta=$(github_meta) || return $?
     printf '%s\n' "$github_dc_meta" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" '
-        include "jq/common";
+        '"$BOARD_LIB"'
         ([.fields.nodes[] | select(.name == "Status") | .options[].name]) as $statuses
         | {warnings: [.workflows.nodes[] | select(.enabled)
                       | select(.name == "Auto-close issue" or .name == "Item closed")
@@ -176,7 +179,7 @@ github_board_list() {
     github_require_project
     github_bl_doc=$(_jq -nc --arg owner "$GH_OWNER" '{owner: $owner}' | github_query OwnerProjects) || return $?
     printf '%s' "$github_bl_doc" | _jq -c '
-        include "jq/common";
+        '"$BOARD_LIB"'
         [.repositoryOwner.projectsV2.nodes[] | select(.closed | not)
          | {id: .number, name: .title, url} | make_board]'
 }
@@ -184,7 +187,7 @@ github_board_list() {
 github_board_view() {
     github_bv_meta=$(github_meta) || return $?
     printf '%s' "$github_bv_meta" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg number "$GH_NUMBER" '
-        include "jq/common";
+        '"$BOARD_LIB"'
         ([.fields.nodes[] | select(.name == "Status") | .options[] | {id, name} | make_status($cfg)]) as $s
         | {id: $number, name: .title, kind: "github", url,
            columns: ($s | map({name, statuses: [.name]})), statuses: $s}'
@@ -200,8 +203,6 @@ github_api_call() {
 
 # Usage: github_init_discover <url> <repo>
 github_init_discover() {
-    GH_CLI=gh
-    GH_READY=1
     github_id_path=${1#*://}
     github_id_host=${github_id_path%%/*}
     github_id_path=${github_id_path#*/}
@@ -222,10 +223,11 @@ github_init_discover() {
         *) board_usage_die "--repo must be owner/repo, got '$2'" ;;
     esac
     GH_PRIORITY_FIELD=Priority GH_DUE_FIELD='Due date' GH_SPRINT_FIELD=
+    GH_READY=1
     github_id_meta=$(github_meta) || return $?
     printf '%s' "$github_id_meta" | _jq -c --arg owner "$GH_OWNER" --argjson number "$GH_NUMBER" \
         --arg url "https://$github_id_host/$2" '
-        include "jq/common";
+        '"$BOARD_LIB"'
         ([.fields.nodes[] | select(.name == "Status") | .options[].name]) as $names
         | {board: {kind: "github", cli: "gh", url: $url, project: "#", issue_uri: "/issues/{ticket}"},
            target: {owner: $owner, number: $number},

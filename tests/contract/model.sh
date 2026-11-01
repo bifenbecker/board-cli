@@ -3,7 +3,7 @@
 # The common model itself, with no adapter in between.
 
 model_jq() {
-    jq -b -L "$BOARD_TEST_ROOT/lib" "$@" 2>/dev/null || jq -L "$BOARD_TEST_ROOT/lib" "$@"
+    t_jq_cmd -L "$BOARD_TEST_ROOT/lib" "$@"
 }
 
 test_sparse_input_still_gives_every_key() {

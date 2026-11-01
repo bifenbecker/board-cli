@@ -19,7 +19,7 @@ board_read_body_file() {
     if [ "$1" = - ]; then
         BOARD_BODY=$(cat) || board_die "cannot read stdin"
     else
-        [ -f "$1" ] || board_die "file not found: $1"
+        [ -f "$1" ] || board_usage_die "file not found: $1"
         BOARD_BODY=$(cat -- "$1") || board_die "cannot read $1"
     fi
     BOARD_BODY_SET=1

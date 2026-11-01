@@ -4,6 +4,9 @@
 # the agent that called board, so everything goes through board_exec.
 
 BOARD_TIMEOUT=${BOARD_TIMEOUT:-60}
+case $BOARD_TIMEOUT in
+    '' | 0 | *[!0-9]*) BOARD_TIMEOUT=60 ;;
+esac
 BOARD_EXIT_TIMEOUT=124
 
 # Colour, pagers, prompts and update notices all break a parsed answer.
@@ -19,13 +22,18 @@ export NO_COLOR GH_PROMPT_DISABLED GH_NO_UPDATE_NOTIFIER GH_PAGER GLAB_CHECK_UPD
 # The probe runs the tool: on Windows a bare "timeout" can be System32's, which sleeps instead.
 board_timeout_probe() {
     BOARD_TIMEOUT_CMD=
+    BOARD_TIMEOUT_KILL=
     for board_tp_cmd in timeout gtimeout; do
         if command -v "$board_tp_cmd" >/dev/null 2>&1 && "$board_tp_cmd" 5 true >/dev/null 2>&1; then
             BOARD_TIMEOUT_CMD=$board_tp_cmd
+            # A tool that ignores TERM would outlive the timeout without this.
+            if "$board_tp_cmd" -k 1 5 true >/dev/null 2>&1; then
+                BOARD_TIMEOUT_KILL=1
+            fi
             break
         fi
     done
-    export BOARD_TIMEOUT_CMD
+    export BOARD_TIMEOUT_CMD BOARD_TIMEOUT_KILL
 }
 
 # For a system without timeout(1). A background job starts with /dev/null as stdin, so stdin is
@@ -44,6 +52,8 @@ board_watchdog() {
             board_wd_left=$((board_wd_left - 1))
         done
         kill "$board_wd_pid" 2>/dev/null
+        sleep 5
+        kill -9 "$board_wd_pid" 2>/dev/null
     ) >/dev/null 2>&1 </dev/null &
     board_wd_status=0
     wait "$board_wd_pid" || board_wd_status=$?
@@ -58,7 +68,9 @@ board_watchdog() {
 # right after. Returns the command's status; 124 means it timed out, whichever timeout ran it.
 board_exec() {
     board_ex_status=0
-    if [ -n "${BOARD_TIMEOUT_CMD:-}" ]; then
+    if [ -n "${BOARD_TIMEOUT_KILL:-}" ]; then
+        "$BOARD_TIMEOUT_CMD" -k 5 "$BOARD_TIMEOUT" "$@" >"$BOARD_OUT" 2>"$BOARD_ERR" || board_ex_status=$?
+    elif [ -n "${BOARD_TIMEOUT_CMD:-}" ]; then
         "$BOARD_TIMEOUT_CMD" "$BOARD_TIMEOUT" "$@" >"$BOARD_OUT" 2>"$BOARD_ERR" || board_ex_status=$?
     else
         board_watchdog "$@" >"$BOARD_OUT" 2>"$BOARD_ERR" || board_ex_status=$?

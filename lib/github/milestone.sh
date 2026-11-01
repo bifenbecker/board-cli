@@ -12,26 +12,26 @@ github_milestone_list() {
     github_env
     github_ml_doc=$(github_rest_all "repos/$GH_REPO/milestones?state=$1&per_page=100") || return $?
     printf '%s' "$github_ml_doc" | _jq -c --arg l "$2" '
-        include "github/shape";
+        '"$BOARD_LIB"'
         map(gh_milestone) | if $l == "all" then . else .[:($l | tonumber)] end'
 }
 
 github_milestone_view() {
     github_env
     github_mv_doc=$(github_rest GET "repos/$GH_REPO/milestones/$1") || return $?
-    printf '%s' "$github_mv_doc" | _jq -c 'include "github/shape"; gh_milestone'
+    printf '%s' "$github_mv_doc" | _jq -c ''"$BOARD_LIB"' gh_milestone'
 }
 
 github_milestone_create() {
     github_env
     github_mc_doc=$(github_milestone_body | github_rest_body POST "repos/$GH_REPO/milestones") || return $?
-    printf '%s' "$github_mc_doc" | _jq -c 'include "github/shape"; gh_milestone'
+    printf '%s' "$github_mc_doc" | _jq -c ''"$BOARD_LIB"' gh_milestone'
 }
 
 github_milestone_edit() {
     github_env
     github_me_doc=$(github_milestone_body | github_rest_body PATCH "repos/$GH_REPO/milestones/$1") || return $?
-    printf '%s' "$github_me_doc" | _jq -c 'include "github/shape"; gh_milestone'
+    printf '%s' "$github_me_doc" | _jq -c ''"$BOARD_LIB"' gh_milestone'
 }
 
 github_milestone_delete() {

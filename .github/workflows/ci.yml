@@ -59,21 +59,5 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tools
         run: apk add --no-cache jq curl
-      - name: Probe jq
-        run: |
-          jq --version
-          try() { echo "--- $1"; jq -n -L lib "$1" 2>&1 | tail -1; }
-          try 'include "github/shape"; 1'
-          try 'include "github/shape"; {login: "a"} | gh_user'
-          try 'include "github/shape"; "a" | gh_priority({})'
-          try 'include "github/shape"; {user: null} | gh_comment'
-          try 'include "github/shape"; {} | gh_label'
-          try 'include "jq/common"; {} | make_comment'
-          try 'include "jq/common"; {} | make_label'
-          try 'include "jq/common"; include "github/shape"; {} | gh_label'
-          try 'import "github/shape" as s; {} | s::gh_label'
-          try 'include "jq/common"; {id: 1, name: "a"} | {id, name}'
-          try 'def a: {x: 1}; def b: {y} | a; {} | b'
-          try 'include "jq/common"; {a: 1} | {a} | make_label'
       - name: Tests under busybox
         run: sh tests/run.sh

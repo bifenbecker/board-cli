@@ -29,13 +29,14 @@ die() {
     exit 1
 }
 
-prefix=${BOARD_PREFIX:-$HOME/.local}
+prefix=${BOARD_PREFIX:-}
+prefix_given=${BOARD_PREFIX:+1}
 version=
 from=
 uninstall=
 while [ $# -gt 0 ]; do
     case $1 in
-        --prefix) [ $# -ge 2 ] || die "--prefix needs a value"; prefix=$2; shift 2 ;;
+        --prefix) [ $# -ge 2 ] || die "--prefix needs a value"; prefix=$2; prefix_given=1; shift 2 ;;
         --version) [ $# -ge 2 ] || die "--version needs a value"; version=$2; shift 2 ;;
         --from) [ $# -ge 2 ] || die "--from needs a value"; from=$2; shift 2 ;;
         --uninstall) uninstall=1; shift ;;
@@ -43,6 +44,13 @@ while [ $# -gt 0 ]; do
         *) usage >&2; exit 2 ;;
     esac
 done
+
+if [ -z "$prefix_given" ]; then
+    [ -n "${HOME:-}" ] || die "HOME is not set; pass --prefix <dir>"
+    prefix=$HOME/.local
+fi
+# Empty would mean /share and /bin. It comes from an unset variable, never from intent.
+[ -n "$prefix" ] || die "--prefix is empty"
 
 # A relative prefix would be written into the wrapper and break it everywhere else.
 case $prefix in
@@ -58,7 +66,9 @@ MARKER=.board-install
 # marker and is not a git checkout. Both are checked before either is deleted.
 check_ours() {
     if [ -e "$bin" ]; then
-        grep -q 'BOARD_HOME' "$bin" 2>/dev/null || die "$bin was not installed by board; not touching it"
+        # The exec line is the wrapper's alone: a checkout's bin/board mentions BOARD_HOME too.
+        grep -qx 'exec sh "$BOARD_HOME/bin/board" "$@"' "$bin" 2>/dev/null ||
+            die "$bin was not installed by board; not touching it"
     fi
     if [ -e "$home" ]; then
         [ -f "$home/$MARKER" ] && [ ! -e "$home/.git" ] ||
@@ -141,8 +151,8 @@ for item in bin lib VERSION install.sh LICENSE README.md; do
 done
 : >"$stage/$MARKER"
 
+mkdir -p "$prefix/share" "$prefix/bin" || die "cannot write to $prefix"
 [ ! -e "$home" ] && [ ! -e "$bin" ] || remove_install
-mkdir -p "$prefix/share" "$prefix/bin"
 mv "$stage" "$home"
 
 quoted_home=$(printf '%s' "$home" | sed "s/'/'\\\\''/g")

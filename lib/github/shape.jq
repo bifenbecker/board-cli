@@ -1,6 +1,5 @@
-# GitHub answers into the common model. $repo is the owner/name of [board] url.
-
-include "jq/common";
+# GitHub answers into the common model. $repo is the owner/name of [board] url. Adapters prepend
+# this file through $BOARD_LIB, after lib/jq/common.jq.
 
 def gh_user: if . == null then null else {id: .login, name: (.name // .login)} end;
 

@@ -95,7 +95,7 @@ test_clear_takes_known_fields_only() {
 test_body_file_must_exist() {
     cmd_board
     t_run board issue create --title t --body-file /no/such/file
-    t_status 1
+    t_status 2
 }
 
 test_help_exists_for_every_listed_command() {

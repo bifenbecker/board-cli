@@ -6,7 +6,7 @@
 github_status_list() {
     github_sl_meta=$(github_meta) || return $?
     printf '%s' "$github_sl_meta" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" '
-        include "jq/common";
+        '"$BOARD_LIB"'
         [.fields.nodes[] | select(.name == "Status") | .options[] | {id, name} | make_status($cfg)]'
 }
 
@@ -22,8 +22,8 @@ github_status_write() {
 
 github_status_add() {
     github_sa_have=$(github_status_list) || return $?
-    if printf '%s' "$github_sa_have" | _jq -e --arg n "$1" 'include "jq/common"; any(.[]; .name | ieq($n))' >/dev/null; then
-        printf '%s' "$github_sa_have" | _jq -c --arg n "$1" 'include "jq/common"; [.[] | select(.name | ieq($n))] | first'
+    if printf '%s' "$github_sa_have" | _jq -e --arg n "$1" ''"$BOARD_LIB"' any(.[]; .name | ieq($n))' >/dev/null; then
+        printf '%s' "$github_sa_have" | _jq -c --arg n "$1" ''"$BOARD_LIB"' [.[] | select(.name | ieq($n))] | first'
         return 0
     fi
     GH_STATUS_NAME=$1

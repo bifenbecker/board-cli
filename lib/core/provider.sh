@@ -5,7 +5,15 @@
 
 BOARD_LOADED_GROUPS=
 
+# The model and this board's shapes, prepended to an adapter's filters. Not an include inside
+# shape.jq: jq 1.8.0 aborts on a function that an included module gets from another include.
+board_lib_load() {
+    [ -z "${BOARD_LIB:-}" ] || return 0
+    BOARD_LIB=$(cat "$BOARD_HOME/lib/jq/common.jq" "$BOARD_HOME/lib/$BOARD_KIND/shape.jq")
+}
+
 board_provider_load() {
+    board_lib_load
     board_pl_file=$BOARD_HOME/lib/$BOARD_KIND/$1.sh
     case " $BOARD_LOADED_GROUPS " in
         *" $1 "*) return 0 ;;
@@ -67,6 +75,9 @@ board_call_kind() {
     BOARD_CONFIG_JSON='{}'
     board_provider_load core
     board_provider_load "${board_ck_name%%_*}"
+    if board_fn_exists "${BOARD_KIND}_env"; then
+        "${BOARD_KIND}_env"
+    fi
     board_fn_exists "${BOARD_KIND}_$board_ck_name" || board_unsupported "board init"
     "${BOARD_KIND}_$board_ck_name" "$@"
 }

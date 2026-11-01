@@ -16,7 +16,7 @@ complain() {
 }
 
 contract=$(awk '{ print $1 }' lib/contract.txt | sort)
-called=$(grep -hoE 'board_call(_kind)? [a-z0-9_]*' lib/cmd/*.sh | awk '{ print $2 }' | sort -u)
+called=$(grep -hv '^[[:space:]]*#' lib/cmd/*.sh | grep -oE 'board_call(_kind)? [a-z0-9_]*' | awk '{ print $2 }' | sort -u)
 
 for name in $called; do
     printf '%s\n' "$contract" | grep -qx "$name" || complain "lib/cmd calls $name, which lib/contract.txt does not list"
@@ -55,9 +55,10 @@ done
 leaks=$(awk '
     FNR == 1 { heredoc = "" }
     heredoc != "" { if ($0 == heredoc) heredoc = ""; next }
-    /<<.?EOF.?$/ { heredoc = "EOF"; next }
     /^[ \t]*#/ { next }
-    /(linear|jira|github|gitlab|BOARD_KIND)/ { printf "%s:%d: %s\n", FILENAME, FNR, $0 }
+    { text = tolower($0) }
+    text ~ /(linear|jira|github|gitlab|board_kind[^_])/ { printf "%s:%d: %s\n", FILENAME, FNR, $0 }
+    /<<-?.?EOF.?$/ { heredoc = "EOF" }
 ' lib/cmd/*.sh)
 if [ -n "$leaks" ]; then
     printf '%s\n' "$leaks" >&2

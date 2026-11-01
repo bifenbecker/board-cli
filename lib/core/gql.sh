@@ -16,8 +16,16 @@ board_paged() {
     : >"$board_pg_file"
     while :; do
         board_pg_page=$("$board_pg_fetch" "$board_pg_after") || return $?
-        printf '%s\n' "$board_pg_page" | _jq -c '.nodes[]' >>"$board_pg_file"
-        eval "$(printf '%s\n' "$board_pg_page" | _jq -r '@sh "board_pg_next=\(.has_next) board_pg_after=\(.end_cursor // "")"')"
+        board_pg_meta=$(printf '%s\n' "$board_pg_page" | _jq -r '
+            if (.nodes | type) == "array" and (.has_next | type) == "boolean"
+            then @sh "board_pg_next=\(.has_next | tostring) board_pg_cursor=\(.end_cursor // "" | tostring)"
+            else error("bad page") end' 2>/dev/null) || board_die "the board gave a page that cannot be read"
+        printf '%s\n' "$board_pg_page" | _jq -c '.nodes[]' >>"$board_pg_file" || board_die "the board gave a page that cannot be read"
+        eval "$board_pg_meta"
+        if [ "$board_pg_next" = true ] && [ "$board_pg_cursor" = "$board_pg_after" ]; then
+            board_die "the board returned the same page twice"
+        fi
+        board_pg_after=$board_pg_cursor
         board_pg_count=$(wc -l <"$board_pg_file")
         if [ "$board_pg_limit" != all ] && [ "$board_pg_count" -ge "$board_pg_limit" ]; then
             break

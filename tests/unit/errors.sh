@@ -42,7 +42,7 @@ test_unreadable_body_file_is_a_failure_not_an_empty_body() {
     errors_github
     mkdir body-is-a-directory
     t_run board issue edit 12 --body-file body-is-a-directory
-    t_status 1
+    t_status 2
     [ ! -s "$FAKE_LOG" ] || t_fail "the board was reached: $(cat "$FAKE_LOG")"
 }
 

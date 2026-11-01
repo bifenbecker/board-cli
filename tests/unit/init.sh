@@ -101,7 +101,7 @@ EOF
     before=$(cat workflow.toml)
     init_run
     t_status 2
-    t_contains "$T_OUT" '[board]'
+    t_contains "$T_ERR" '[board]'
     t_eq "$(cat workflow.toml)" "$before" file
 }
 
