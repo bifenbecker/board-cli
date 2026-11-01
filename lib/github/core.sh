@@ -13,6 +13,7 @@ github_env() {
         GH_REPO=${GH_REPO#*/}
         GH_REPO=${GH_REPO%/}
         GH_REPO=${GH_REPO%.git}
+        board_require_trusted_host github.com
         if [ "$BOARD_HOST" != github.com ]; then
             GH_HOST=$BOARD_HOST
             export GH_HOST

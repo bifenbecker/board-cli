@@ -328,7 +328,7 @@ cmd_doctor() {
         board_config_load
         board_d_url=$BOARD_URL
         board_d_kind=$(board_config_get .kind)
-        if [ -n "$BOARD_CLI" ]; then
+        if board_cli_needed; then
             board_d_has=false
             if command -v "$BOARD_CLI" >/dev/null 2>&1; then
                 board_d_has=true
@@ -438,6 +438,9 @@ PLATFORM NOTES
         host in BOARD_JIRA_HOSTS is reached over https only; http needs http:// in server.
   GitHub: log in with 'gh auth login'. The project scope is required.
   GitLab: log in with 'glab auth login --hostname <host>'.
+  GitHub, GitLab: a host other than github.com or gitlab.com must be in BOARD_TRUSTED_HOSTS, a
+        space-separated list in your environment, or exit 5: the host comes with a repository, and
+        a token in your environment would go to it.
 
 EXAMPLES
   board auth status
