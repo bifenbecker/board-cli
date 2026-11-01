@@ -82,9 +82,11 @@ board_exec() {
 }
 
 # A tool ran out of time. A read failed; a write may or may not have happened, so it must not be
-# repeated blindly.
+# repeated blindly. BOARD_WRITE starts as "this command writes": an adapter's transport narrows it
+# to each call, so a read that times out before any write stays a plain failure.
 board_timed_out() {
     if [ -n "${BOARD_WRITE:-}" ]; then
+        [ -z "${BOARD_WRITE_ID:-}" ] || printf '%s\n' "$BOARD_WRITE_ID"
         board_warn "timed out after ${BOARD_TIMEOUT}s: the write may have gone through. Check before repeating it"
         return "$BOARD_EXIT_PARTIAL"
     fi
