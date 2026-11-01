@@ -9,7 +9,7 @@ help:
 
 # Lint every shell file, then check help completeness and the provider contract
 lint:
-    shellcheck bin/board install.sh lib/*/*.sh scripts/*.sh tests/*.sh tests/lib/*.sh tests/unit/*.sh tests/fake/*
+    shellcheck bin/board install.sh lib/*/*.sh scripts/*.sh tests/*.sh tests/lib/*.sh tests/unit/*.sh tests/contract/*.sh tests/fake/*
     sh scripts/check-help.sh
     sh scripts/check-contract.sh
 

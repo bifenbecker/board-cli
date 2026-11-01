@@ -1,0 +1,38 @@
+auth_status            auth status
+doctor_checks          doctor
+init_discover          init
+board_list             list
+board_view             view
+api_call               api
+issue_list             issue list
+issue_view             issue view
+issue_create           issue create
+issue_edit             issue edit
+issue_move             issue move
+issue_close            issue close
+issue_reopen           issue reopen
+issue_delete           issue delete
+issue_comment_list     issue comment list
+issue_comment_add      issue comment add
+issue_comment_edit     issue comment edit
+issue_comment_delete   issue comment delete
+issue_link_list        issue link list
+issue_link_add         issue link add
+issue_link_remove      issue link remove
+status_list            status list
+status_add             status add
+status_rename          status rename
+status_delete          status delete
+label_list             label list
+label_create           label create
+label_edit             label edit
+label_delete           label delete
+member_list            member list
+sprint_list            sprint list
+sprint_view            sprint view
+sprint_current         sprint current
+milestone_list         milestone list
+milestone_view         milestone view
+milestone_create       milestone create
+milestone_edit         milestone edit
+milestone_delete       milestone delete

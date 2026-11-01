@@ -16,7 +16,7 @@ complain() {
 }
 
 contract=$(awk '{ print $1 }' lib/contract.txt | sort)
-called=$(grep -ho 'board_call [a-z0-9_]*' lib/cmd/*.sh | awk '{ print $2 }' | sort -u)
+called=$(grep -hoE 'board_call(_kind)? [a-z0-9_]*' lib/cmd/*.sh | awk '{ print $2 }' | sort -u)
 
 for name in $called; do
     printf '%s\n' "$contract" | grep -qx "$name" || complain "lib/cmd calls $name, which lib/contract.txt does not list"

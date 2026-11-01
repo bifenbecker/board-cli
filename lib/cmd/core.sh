@@ -210,6 +210,283 @@ cmd_config_path() {
     fi
 }
 
+# --- board ------------------------------------------------------------------------------
+
+help_list() {
+    cat <<'EOF'
+NAME
+  board list - boards reachable with the current login
+
+USAGE
+  board list
+
+DESCRIPTION
+  Lists the boards the login of this board kind can reach: the same service, not only the one
+  declared in [board]. Use the URL with 'board init'.
+
+OUTPUT
+  Text: one board per line, tab-separated: id, name, URL.
+  JSON: array of {id, name, url}
+
+PLATFORM NOTES
+  Linear: teams of the workspace.
+  Jira: boards of the site.
+  GitHub: projects of the owner in [board.target].
+  GitLab: boards of the project in [board] url.
+
+EXAMPLES
+  board list
+  board list --jq '.[].url'
+EOF
+}
+
+cmd_list() {
+    [ $# -eq 0 ] || board_unexpected "$1"
+    board_doc=$(board_call board_list) || exit $?
+    printf '%s\n' "$board_doc" | board_output text_boards
+}
+
+help_view() {
+    cat <<'EOF'
+NAME
+  board view - this board: columns and statuses
+
+USAGE
+  board view
+
+DESCRIPTION
+  Shows the board declared in [board]: its columns and the statuses in each.
+
+OUTPUT
+  Text: the name, then one column per line with its statuses.
+  JSON: {id, name, kind, url, columns[{name, statuses[]}], statuses[{id, name, category}]}
+
+PLATFORM NOTES
+  Linear, GitHub: a column is a status.
+  Jira: a column may hold several statuses.
+  GitLab: the columns are the lists of the board, and the implicit Open and Closed are not shown.
+
+EXAMPLES
+  board view
+  board view --jq '.columns[].name'
+EOF
+}
+
+cmd_view() {
+    [ $# -eq 0 ] || board_unexpected "$1"
+    board_doc=$(board_call board_view) || exit $?
+    printf '%s\n' "$board_doc" | board_output text_board
+}
+
+# --- doctor -------------------------------------------------------------------------------
+
+help_doctor() {
+    cat <<'EOF'
+NAME
+  board doctor - check tools, the declaration and login
+
+USAGE
+  board doctor
+
+DESCRIPTION
+  One call that says whether board can work here: the tools it needs, the [board] declaration, the
+  login, and what would make results wrong, such as a status with no category. Run it first.
+
+OUTPUT
+  Text: one finding per line.
+  JSON: {version, ok, file, kind, url, authenticated, user, tools{<name>: bool},
+         warnings[], errors[]}
+  Exit 1 when ok is false: errors says why. A warning does not stop board from working.
+
+PLATFORM NOTES
+  GitHub: warns about project workflows that change a status or close an issue on their own.
+
+EXAMPLES
+  board doctor
+  board doctor --jq .errors
+EOF
+}
+
+cmd_doctor() {
+    [ $# -eq 0 ] || board_unexpected "$1"
+    board_d_version=$(tr -d '\r\n' <"$BOARD_HOME/VERSION")
+    board_d_tools='{}'
+    board_d_errors='[]'
+    board_d_warnings='[]'
+    for board_d_tool in jq curl; do
+        board_d_has=false
+        if command -v "$board_d_tool" >/dev/null 2>&1; then
+            board_d_has=true
+        fi
+        board_d_tools=$(printf '%s' "$board_d_tools" | _jq -c --arg t "$board_d_tool" --argjson h "$board_d_has" '. + {($t): $h}')
+    done
+    board_d_kind='' board_d_url='' board_d_file='' board_d_auth='{}'
+    if board_d_found=$(board_config_find 2>/dev/null); then
+        board_d_file=$board_d_found
+    fi
+    if board_d_problem=$( (board_config_load) 2>&1); then
+        board_config_load
+        board_d_url=$BOARD_URL
+        board_d_kind=$(board_config_get .kind)
+        if [ -n "$BOARD_CLI" ]; then
+            board_d_has=false
+            if command -v "$BOARD_CLI" >/dev/null 2>&1; then
+                board_d_has=true
+            fi
+            board_d_tools=$(printf '%s' "$board_d_tools" | _jq -c --arg t "$BOARD_CLI" --argjson h "$board_d_has" '. + {($t): $h}')
+        fi
+        board_d_status=0
+        board_d_auth=$( (board_call auth_status) 2>"$BOARD_TMP/doctor.err") || board_d_status=$?
+        if [ "$board_d_status" -ne 0 ]; then
+            board_d_errors=$(printf '%s' "$board_d_errors" | _jq -c --arg e "login: $(sed -n 1p "$BOARD_TMP/doctor.err")" '. + [$e]')
+            board_d_auth='{}'
+        else
+            board_d_checks=$( (board_call doctor_checks) 2>/dev/null) || board_d_checks='{"warnings":[],"errors":[]}'
+            board_d_warnings=$(printf '%s' "$board_d_checks" | _jq -c '.warnings')
+            board_d_errors=$(printf '%s\n%s\n' "$board_d_errors" "$board_d_checks" | _jq -sc '.[0] + .[1].errors')
+        fi
+    else
+        board_d_problem=$(printf '%s' "$board_d_problem" | sed -n 1p)
+        board_d_errors=$(printf '%s' "$board_d_errors" | _jq -c --arg e "$board_d_problem" '. + [$e]')
+    fi
+    board_d_doc=$(printf '%s' "$board_d_auth" | _jq -c --arg version "$board_d_version" --arg file "$board_d_file" \
+        --arg kind "$board_d_kind" --arg url "$board_d_url" --argjson tools "$board_d_tools" \
+        --argjson errors "$board_d_errors" --argjson warnings "$board_d_warnings" '
+        def opt: if . == "" then null else . end;
+        {version: $version,
+         ok: ($errors == [] and ($tools | all(.)) and (.authenticated // false)),
+         file: ($file | opt), kind: ($kind | opt), url: ($url | opt),
+         authenticated: (.authenticated // false), user: (.user // null),
+         tools: $tools, warnings: $warnings, errors: $errors}')
+    printf '%s\n' "$board_d_doc" | board_output text_doctor
+    printf '%s' "$board_d_doc" | _jq -e .ok >/dev/null || exit "$BOARD_EXIT_ERROR"
+}
+
+# --- capabilities -------------------------------------------------------------------------
+
+help_capabilities() {
+    cat <<'EOF'
+NAME
+  board capabilities - what this board can and cannot do
+
+USAGE
+  board capabilities
+
+DESCRIPTION
+  Lists the commands that work on the board declared in [board], and those that exit 3 with the
+  reason. Ask this instead of trying a command to see if it fails. Some limits depend on the plan
+  or the project, and those show up as exit 3 from the command itself.
+
+OUTPUT
+  Text: the two lists.
+  JSON: {kind, supported[], unsupported[{command, reason}]}
+
+EXAMPLES
+  board capabilities --json
+  board capabilities --jq '.unsupported[].command'
+EOF
+}
+
+cmd_capabilities() {
+    [ $# -eq 0 ] || board_unexpected "$1"
+    board_config_load
+    board_capabilities_json | board_output text_capabilities
+}
+
+# --- auth ---------------------------------------------------------------------------------
+
+help_auth() {
+    cat <<'EOF'
+board auth - login state
+
+board does not log in by itself: each board keeps the login of its own tool. Log in with that tool,
+or for Jira set JIRA_API_TOKEN.
+
+COMMANDS
+  status    Show whether the login works
+
+Run 'board auth <command> --help' for details.
+EOF
+}
+
+help_auth_status() {
+    cat <<'EOF'
+NAME
+  board auth status - show whether the login works
+
+USAGE
+  board auth status
+
+DESCRIPTION
+  Asks the board who the login belongs to. Exit 5 when there is no working login.
+
+OUTPUT
+  Text: one line.
+  JSON: {kind, host, authenticated, user}
+
+PLATFORM NOTES
+  Linear: log in with 'linear auth login', or set LINEAR_API_KEY.
+  Jira: needs login and server in the jira-cli config, and JIRA_API_TOKEN or ~/.netrc. The host of
+        [board] url must equal the server there, so a file in a repository cannot send your token
+        somewhere else.
+  GitHub: log in with 'gh auth login'. The project scope is required.
+  GitLab: log in with 'glab auth login --hostname <host>'.
+
+EXAMPLES
+  board auth status
+  board auth status --jq .user
+EOF
+}
+
+cmd_auth_status() {
+    [ $# -eq 0 ] || board_unexpected "$1"
+    board_doc=$(board_call auth_status) || exit $?
+    printf '%s\n' "$board_doc" | board_output text_auth
+}
+
+# --- api ----------------------------------------------------------------------------------
+
+help_api() {
+    cat <<'EOF'
+NAME
+  board api - call the board's own API
+
+USAGE
+  board api <args...>
+
+DESCRIPTION
+  Passes the arguments to the board's tool, with the host of [board] filled in, and prints its
+  answer unchanged. For what no command covers. What it prints is not normalised, so a call made
+  here will not carry over to another board. A body is read from stdin.
+
+ARGUMENTS
+  <args...>   Linear: the query, or - for stdin
+              Jira: METHOD and path
+              GitHub: the arguments of 'gh api'
+              GitLab: the arguments of 'glab api'
+
+OUTPUT
+  Text: the answer as the board gives it.
+  JSON: the same; --jq filters it.
+
+EXAMPLES
+  board api '{ viewer { id } }'
+  board api GET /rest/api/2/myself
+  board api repos/bifenbecker/board-cli/labels
+  board api projects/88364440/boards
+EOF
+}
+
+cmd_api() {
+    [ $# -gt 0 ] || board_usage_die "<args...> are required"
+    if [ -n "${BOARD_JQ:-}" ]; then
+        board_doc=$(board_call api_call "$@") || exit $?
+        printf '%s\n' "$board_doc" | board_output .
+    else
+        board_call api_call "$@" || exit $?
+    fi
+}
+
 # --- self ---------------------------------------------------------------------------------
 
 help_self() {

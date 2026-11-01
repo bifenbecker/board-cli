@@ -1,0 +1,21 @@
+{
+  "id": "string",
+  "kind": "string",
+  "url": "string|null",
+  "title": "string|null",
+  "description": "string|null",
+  "type": "string|null",
+  "status": "object",
+  "assignees": "array",
+  "labels": "array",
+  "priority": "string|null",
+  "parent": "string|null",
+  "subtasks": "array",
+  "links": "array",
+  "sprint": "string|null",
+  "milestone": "string|null",
+  "due_date": "string|null",
+  "author": "object|null",
+  "created_at": "string|null",
+  "updated_at": "string|null"
+}
