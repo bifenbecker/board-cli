@@ -3,6 +3,8 @@
 # The GitLab adapter against the fake glab: what an answer means, and the status model on labels.
 
 gitlab_board() {
+    BOARD_TRUSTED_HOSTS='gitlab.example.com code.example.com git.corp:8443'
+    export BOARD_TRUSTED_HOSTS
     t_workflow <<'EOF'
 [board]
 kind = "gitlab"
