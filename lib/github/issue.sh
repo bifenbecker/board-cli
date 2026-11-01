@@ -597,14 +597,26 @@ github_issue_comment_add() {
     printf '%s' "$github_ca_doc" | _jq -c ''"$BOARD_LIB"' gh_comment'
 }
 
+# A comment id works on its own in the API, so a wrong issue would pass unnoticed.
+# Usage: github_comment_of_issue <comment id>
+github_comment_of_issue() {
+    github_co_doc=$(github_rest GET "repos/$GH_ID_REPO/issues/comments/$1") || return $?
+    if ! printf '%s' "$github_co_doc" | _jq -e --arg n "/issues/$GH_ID_NUMBER" '.issue_url | endswith($n)' >/dev/null; then
+        board_warn "comment $1 is not on issue $GH_ID_NUMBER"
+        return "$BOARD_EXIT_NOT_FOUND"
+    fi
+}
+
 github_issue_comment_edit() {
     github_comment_target "$1" || return $?
+    github_comment_of_issue "$2" || return $?
     github_ce_doc=$(github_rest_body PATCH "repos/$GH_ID_REPO/issues/comments/$2") || return $?
     printf '%s' "$github_ce_doc" | _jq -c ''"$BOARD_LIB"' gh_comment'
 }
 
 github_issue_comment_delete() {
     github_comment_target "$1" || return $?
+    github_comment_of_issue "$2" || return $?
     github_rest DELETE "repos/$GH_ID_REPO/issues/comments/$2" >/dev/null
 }
 

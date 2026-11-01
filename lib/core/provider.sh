@@ -48,6 +48,10 @@ board_call() {
     case $board_call_name in
         *_create | *_edit | *_move | *_close | *_reopen | *_delete | *_add | *_remove | *_rename) BOARD_WRITE=1 ;;
     esac
+    # Exit 6 promises an id, and these calls know theirs before they start.
+    case $board_call_name in
+        issue_edit | issue_move | issue_close | issue_reopen | issue_link_add | issue_link_remove) BOARD_WRITE_ID=${1:-} ;;
+    esac
     board_provider_load core
     board_provider_load "${board_call_name%%_*}"
     if board_fn_exists "${BOARD_KIND}_env"; then
