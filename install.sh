@@ -79,7 +79,7 @@ check_ours() {
 remove_install() {
     check_ours
     if [ -e "$bin" ]; then
-        rm -f "$bin"
+        rm -f "$bin" "$bin.cmd"
         say "removed $bin"
     fi
     if [ -e "$home" ]; then
@@ -163,6 +163,13 @@ export BOARD_HOME
 exec sh "\$BOARD_HOME/bin/board" "\$@"
 EOF
 chmod +x "$bin" "$home/bin/board"
+if [ -x /usr/bin/cygpath ]; then
+    # cmd.exe and PowerShell cannot run the wrapper above.
+    cat >"$bin.cmd" <<EOF
+@echo off
+call "$(cygpath -w "$home")\\bin\\board.cmd" %*
+EOF
+fi
 
 say "installed board $(tr -d '\r\n' <"$home/VERSION") into $home"
 case ":$PATH:" in
