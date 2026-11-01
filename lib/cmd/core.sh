@@ -328,7 +328,7 @@ cmd_doctor() {
         board_config_load
         board_d_url=$BOARD_URL
         board_d_kind=$(board_config_get .kind)
-        if [ -n "$BOARD_CLI" ]; then
+        if board_cli_needed; then
             board_d_has=false
             if command -v "$BOARD_CLI" >/dev/null 2>&1; then
                 board_d_has=true
