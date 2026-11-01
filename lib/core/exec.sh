@@ -57,13 +57,18 @@ board_watchdog() {
 
 # Usage: board_exec <command> [args...]
 # Stdin passes through. Stdout goes to $BOARD_OUT and stderr to $BOARD_ERR, read by the caller
-# right after. Returns the command's status; 124 means it timed out.
+# right after. Returns the command's status; 124 means it timed out, whichever timeout ran it.
 board_exec() {
+    board_ex_status=0
     if [ -n "${BOARD_TIMEOUT_CMD:-}" ]; then
-        "$BOARD_TIMEOUT_CMD" "$BOARD_TIMEOUT" "$@" >"$BOARD_OUT" 2>"$BOARD_ERR"
+        "$BOARD_TIMEOUT_CMD" "$BOARD_TIMEOUT" "$@" >"$BOARD_OUT" 2>"$BOARD_ERR" || board_ex_status=$?
     else
-        board_watchdog "$@" >"$BOARD_OUT" 2>"$BOARD_ERR"
+        board_watchdog "$@" >"$BOARD_OUT" 2>"$BOARD_ERR" || board_ex_status=$?
     fi
+    case $board_ex_status in
+        143 | 137) return "$BOARD_EXIT_TIMEOUT" ;;
+    esac
+    return "$board_ex_status"
 }
 
 # Saves the raw answer as a fixture when BOARD_RECORD names a directory. Headers are never saved.
