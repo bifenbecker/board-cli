@@ -185,6 +185,18 @@ board_config_load() {
     BOARD_CONFIG_LOADED=1
 }
 
+# The host in [board] url comes with a repository, and gh and glab send a token from the environment
+# (GH_ENTERPRISE_TOKEN, GITLAB_TOKEN) to whatever host they are told. So a host other than the
+# service's own must be named by the user, outside any repository.
+# Usage: board_require_trusted_host <the service's own host>
+board_require_trusted_host() {
+    [ "$BOARD_HOST" != "$1" ] || return 0
+    case " ${BOARD_TRUSTED_HOSTS:-} " in
+        *" $BOARD_HOST "*) return 0 ;;
+    esac
+    board_auth_die "host $BOARD_HOST comes from workflow.toml and is not trusted: add it to BOARD_TRUSTED_HOSTS"
+}
+
 # Reads one key of a [board.<section>] table, or "" when absent.
 # Usage: board_config_get <jq path, e.g. .target.number>
 board_config_get() {

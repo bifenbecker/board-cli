@@ -48,6 +48,9 @@ Jira is reached over its REST API with the login from the jira-cli config. The t
 host you named outside any repository: the `server` of your own jira-cli config, or a host in
 `BOARD_JIRA_HOSTS`. A `workflow.toml` that arrives with a repository cannot send it elsewhere.
 
+A self-hosted GitHub or GitLab needs its host in `BOARD_TRUSTED_HOSTS`, for the same reason: `gh`
+and `glab` send a token from the environment to whatever host they are told.
+
 ## Quick start
 
 ```sh

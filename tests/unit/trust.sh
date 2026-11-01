@@ -41,3 +41,40 @@ EOF
     t_run board config get cli
     t_status 0
 }
+
+test_foreign_github_host_is_refused() {
+    t_workflow <<'EOF'
+[board]
+kind = "github"
+url  = "https://github.evil.example/a/b"
+
+[board.target]
+owner  = "a"
+number = 5
+EOF
+    t_run board issue list
+    t_status 5
+    t_contains "$T_ERR" BOARD_TRUSTED_HOSTS
+    [ ! -s "$FAKE_LOG" ] || t_fail "the host was reached: $(cat "$FAKE_LOG")"
+}
+
+test_host_named_by_the_user_is_accepted() {
+    t_workflow <<'EOF'
+[board]
+kind = "github"
+url  = "https://github.acme.example/a/b"
+
+[board.target]
+owner  = "a"
+number = 5
+EOF
+    FAKE_OVERRIDE=$T_TMP/answers
+    export FAKE_OVERRIDE
+    mkdir -p "$FAKE_OVERRIDE"
+    printf '{"data":{"viewer":{"login":"me"}}}' >"$FAKE_OVERRIDE/Viewer.json"
+    BOARD_TRUSTED_HOSTS='github.acme.example other.example'
+    export BOARD_TRUSTED_HOSTS
+    t_run board auth status --jq .user
+    t_status 0
+    t_eq "$T_OUT" me
+}

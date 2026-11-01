@@ -120,3 +120,9 @@ board_capabilities_json() {
         END { printf "{\"kind\":%s,\"supported\":[%s],\"unsupported\":[%s]}\n", str(kind), ok, out }
     ' "$BOARD_HOME/lib/contract.txt"
 }
+
+# Whether this board's work goes through [board] cli. Jira is reached over curl: its cli stays
+# declared for the rest of a project's tooling, and board never runs it.
+board_cli_needed() {
+    [ -n "$BOARD_CLI" ] && [ "$BOARD_KIND" != jira ]
+}
