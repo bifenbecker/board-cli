@@ -1,0 +1,10 @@
+# The Linear test board: team 3KD, project Test. Everything on it may be created and deleted.
+[board]
+kind      = "linear"
+cli       = "linear"
+url       = "https://linear.app/3kd"
+project   = "3KD"
+issue_uri = "/issue/{ticket}"
+
+[board.target]
+project = "982b67e1e776"

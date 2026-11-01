@@ -71,12 +71,30 @@ board_exec() {
     return "$board_ex_status"
 }
 
+# A tool ran out of time. A read failed; a write may or may not have happened, so it must not be
+# repeated blindly.
+board_timed_out() {
+    if [ -n "${BOARD_WRITE:-}" ]; then
+        board_warn "timed out after ${BOARD_TIMEOUT}s: the write may have gone through. Check before repeating it"
+        return "$BOARD_EXIT_PARTIAL"
+    fi
+    board_warn "timed out after ${BOARD_TIMEOUT}s"
+    return "$BOARD_EXIT_ERROR"
+}
+
 # Saves the raw answer as a fixture when BOARD_RECORD names a directory. Headers are never saved.
 # Usage: board_record <name>
 board_record() {
     [ -n "${BOARD_RECORD:-}" ] || return 0
     mkdir -p "$BOARD_RECORD"
-    cp "$BOARD_OUT" "$BOARD_RECORD/$1.json"
+    sed 's/"emailAddress":"[^"]*"/"emailAddress":"user@example.com"/g; s/"email":"[^"]*"/"email":"user@example.com"/g' \
+        "$BOARD_OUT" >"$BOARD_RECORD/$1.json"
+}
+
+# The fixture name of a REST call: the same rule as tests/fake/_fake.sh.
+# Usage: board_rest_key <method> <path>
+board_rest_key() {
+    printf '%s_%s' "$1" "${2%%\?*}" | sed 's/[^A-Za-z0-9.-]\{1,\}/_/g; s/_$//'
 }
 
 # The first line of stderr with terminal escapes gone, for an error message.

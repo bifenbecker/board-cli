@@ -1,0 +1,16 @@
+# The GitHub test board. Everything on it may be created and deleted.
+[board]
+kind      = "github"
+cli       = "gh"
+url       = "https://github.com/bifenbecker/board-cli"
+project   = "#"
+issue_uri = "/issues/{ticket}"
+
+[board.target]
+owner  = "bifenbecker"
+number = 5
+
+[board.statuses]
+"Todo"        = "todo"
+"In Progress" = "in_progress"
+"Done"        = "done"

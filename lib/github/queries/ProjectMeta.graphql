@@ -1,0 +1,27 @@
+query ProjectMeta($owner: String!, $number: Int!) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        id
+        title
+        url
+        workflows(first: 20) { nodes { name enabled } }
+        fields(first: 50) {
+          nodes {
+            ... on ProjectV2Field { id name dataType }
+            ... on ProjectV2SingleSelectField { id name dataType options { id name color description } }
+            ... on ProjectV2IterationField {
+              id
+              name
+              dataType
+              configuration {
+                iterations { id title startDate duration }
+                completedIterations { id title startDate duration }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

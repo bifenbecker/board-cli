@@ -62,7 +62,7 @@ cmd_milestone_list() {
     done
     board_require_one_of --state "$opt_state" open closed all
     board_require_limit "$opt_limit"
-    board_doc=$(board_call milestone_list "$opt_state" "$opt_limit") || exit $?
+    board_doc=$(board_call milestone_list "$opt_state" "$opt_limit") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_milestones
 }
 
@@ -91,7 +91,8 @@ EOF
 
 cmd_milestone_view() {
     [ $# -eq 1 ] || board_usage_die "<id> is required"
-    board_doc=$(board_call milestone_view "$1") || exit $?
+    board_require_id "$1"
+    board_doc=$(board_call milestone_view "$1") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_milestone
 }
 
@@ -115,8 +116,8 @@ milestone_intent() {
     done
     _jq -nc --arg name "$opt_name" --arg description "$opt_description" \
         --arg description_set "$opt_description_set" --arg due "$opt_due" --arg state "$opt_state" '
-        def opt: if . == "" then null else . end;
-        {name: ($name | opt), due: ($due | opt), state: ($state | opt),
+        include "jq/common";
+        {name: ($name | nullify), due: ($due | nullify), state: ($state | nullify),
          description: (if $description_set == "" then null else $description end)}' >"$BOARD_TMP/intent"
 }
 
@@ -152,7 +153,8 @@ EOF
 cmd_milestone_create() {
     milestone_intent "$@"
     [ -n "$opt_name" ] || board_usage_die "--name is required"
-    board_doc=$(board_call milestone_create <"$BOARD_TMP/intent") || exit $?
+    [ -z "$opt_state" ] || board_usage_die "--state is for 'board milestone edit'"
+    board_doc=$(board_call milestone_create <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -194,12 +196,10 @@ cmd_milestone_edit() {
     [ $# -ge 1 ] || board_usage_die "<id> is required"
     arg_id=$1
     shift
-    case $arg_id in
-        -*) board_usage_die "<id> is required" ;;
-    esac
+    board_require_id "$arg_id"
     milestone_intent "$@"
     [ -n "$opt_name$opt_description_set$opt_due$opt_state" ] || board_usage_die "nothing to change: pass at least one flag"
-    board_doc=$(board_call milestone_edit "$arg_id" <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call milestone_edit "$arg_id" <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -243,7 +243,7 @@ cmd_milestone_delete() {
                 ;;
         esac
     done
-    [ -n "$arg_id" ] || board_usage_die "<id> is required"
+    board_require_id "$arg_id"
     [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
     board_call milestone_delete "$arg_id" || exit $?
     if board_json_mode; then

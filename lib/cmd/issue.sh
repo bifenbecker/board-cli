@@ -32,17 +32,8 @@ Run 'board issue <command> --help' for details.
 EOF
 }
 
-issue_require_id() {
-    [ -n "$1" ] || board_usage_die "<id> is required"
-    case $1 in
-        -*) board_usage_die "<id> must not start with a dash, got '$1'" ;;
-    esac
-}
-
-# Shared by create and edit. Takes the current arguments, handles one flag and sets BOARD_TAKEN to
-# the number of arguments used. Returns 1 when the flag is not one of these.
+# Shared by create and edit. Handles one flag with its value. Returns 1 when it is not one of these.
 issue_field_flag() {
-    BOARD_TAKEN=2
     case $1 in
         -t | --title) board_arg "$@"; opt_title=$2; opt_title_set=1 ;;
         -b | --body) board_arg "$@"; BOARD_BODY=$2; BOARD_BODY_SET=1 ;;
@@ -79,13 +70,13 @@ issue_intent() {
         --arg add_labels "$opt_add_labels" --arg remove_labels "$opt_remove_labels" \
         --arg add_assignees "$opt_add_assignees" --arg remove_assignees "$opt_remove_assignees" \
         --arg clear "$opt_clear" '
-        def opt: if . == "" then null else . end;
+        include "jq/common";
         def list: if . == "" then [] else split("\n") end;
         {title: (if $title_set == "" then null else $title end),
          body: (if $body_set == "" then null else . end),
-         status: ($status | opt), priority: ($priority | opt), type: ($type | opt),
-         parent: ($parent | opt), sprint: ($sprint | opt), milestone: ($milestone | opt),
-         due: ($due | opt), assignees: ($assignees | list), labels: ($labels | list),
+         status: ($status | nullify), priority: ($priority | nullify), type: ($type | nullify),
+         parent: ($parent | nullify), sprint: ($sprint | nullify), milestone: ($milestone | nullify),
+         due: ($due | nullify), assignees: ($assignees | list), labels: ($labels | list),
          add_labels: ($add_labels | list), remove_labels: ($remove_labels | list),
          add_assignees: ($add_assignees | list), remove_assignees: ($remove_assignees | list),
          clear: ($clear | list)}'
@@ -170,13 +161,13 @@ cmd_issue_list() {
         --arg labels "$opt_labels" --arg priority "$opt_priority" --arg type "$opt_type" \
         --arg sprint "$opt_sprint" --arg milestone "$opt_milestone" --arg parent "$opt_parent" \
         --arg search "$opt_search" --arg limit "$opt_limit" '
-        def opt: if . == "" then null else . end;
-        {category: $category, status: ($status | opt), assignee: ($assignee | opt),
+        include "jq/common";
+        {category: $category, status: ($status | nullify), assignee: ($assignee | nullify),
          labels: (if $labels == "" then [] else ($labels | split("\n")) end),
-         priority: ($priority | opt), type: ($type | opt), sprint: ($sprint | opt),
-         milestone: ($milestone | opt), parent: ($parent | opt), search: ($search | opt),
+         priority: ($priority | nullify), type: ($type | nullify), sprint: ($sprint | nullify),
+         milestone: ($milestone | nullify), parent: ($parent | nullify), search: ($search | nullify),
          limit: (if $limit == "all" then null else ($limit | tonumber) end)}' >"$BOARD_TMP/intent"
-    board_doc=$(board_call issue_list <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call issue_list <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_issues
 }
 
@@ -225,10 +216,16 @@ cmd_issue_view() {
                 ;;
         esac
     done
-    issue_require_id "$arg_id"
-    board_doc=$(board_call issue_view "$arg_id") || exit $?
+    board_require_id "$arg_id"
+    board_doc=$(board_call issue_view "$arg_id") || board_fail "$?" "$board_doc"
     if [ -n "$opt_comments" ]; then
-        board_comments=$(board_call issue_comment_list "$arg_id") || exit $?
+        board_cmt_status=0
+        board_comments=$(board_call issue_comment_list "$arg_id" 2>/dev/null) || board_cmt_status=$?
+        case $board_cmt_status in
+            0) ;;
+            "$BOARD_EXIT_UNSUPPORTED") board_comments='[]' ;;
+            *) exit "$board_cmt_status" ;;
+        esac
         printf '%s\n%s\n' "$board_doc" "$board_comments" | _jq -sc '.[0] + {comments: .[1]}' | board_output text_issue
     else
         printf '%s\n' "$board_doc" | board_output text_issue
@@ -287,7 +284,7 @@ cmd_issue_create() {
     issue_fields_reset
     while [ $# -gt 0 ]; do
         if issue_field_flag "$@"; then
-            shift "$BOARD_TAKEN"
+            shift 2
             continue
         fi
         case $1 in
@@ -299,7 +296,7 @@ cmd_issue_create() {
     done
     [ -n "$opt_title" ] || board_usage_die "--title is required"
     issue_intent >"$BOARD_TMP/intent"
-    board_doc=$(board_call issue_create <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call issue_create <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -361,7 +358,7 @@ cmd_issue_edit() {
     arg_id=''
     while [ $# -gt 0 ]; do
         if issue_field_flag "$@"; then
-            shift "$BOARD_TAKEN"
+            shift 2
             continue
         fi
         case $1 in
@@ -383,12 +380,12 @@ cmd_issue_edit() {
                 ;;
         esac
     done
-    issue_require_id "$arg_id"
+    board_require_id "$arg_id"
     [ -n "$opt_title_set$BOARD_BODY_SET$opt_status$opt_priority$opt_type$opt_parent$opt_sprint$opt_milestone$opt_due$opt_add_labels$opt_remove_labels$opt_add_assignees$opt_remove_assignees$opt_clear" ] ||
         board_usage_die "nothing to change: pass at least one flag"
     [ -z "$opt_title_set" ] || [ -n "$opt_title" ] || board_usage_die "--title must not be empty"
     issue_intent >"$BOARD_TMP/intent"
-    board_doc=$(board_call issue_edit "$arg_id" <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call issue_edit "$arg_id" <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -430,9 +427,9 @@ EOF
 
 cmd_issue_move() {
     [ $# -eq 2 ] || board_usage_die "<id> and <status> are required"
-    issue_require_id "$1"
+    board_require_id "$1"
     [ -n "$2" ] || board_usage_die "<status> must not be empty"
-    board_doc=$(board_call issue_move "$1" "$2") || exit $?
+    board_doc=$(board_call issue_move "$1" "$2") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -483,9 +480,9 @@ cmd_issue_close() {
                 ;;
         esac
     done
-    issue_require_id "$arg_id"
+    board_require_id "$arg_id"
     board_require_one_of --reason "$opt_reason" done canceled
-    board_doc=$(board_call issue_close "$arg_id" "$opt_reason") || exit $?
+    board_doc=$(board_call issue_close "$arg_id" "$opt_reason") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -530,8 +527,8 @@ cmd_issue_reopen() {
                 ;;
         esac
     done
-    issue_require_id "$arg_id"
-    board_doc=$(board_call issue_reopen "$arg_id" "$opt_status") || exit $?
+    board_require_id "$arg_id"
+    board_doc=$(board_call issue_reopen "$arg_id" "$opt_status") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -582,7 +579,7 @@ cmd_issue_delete() {
                 ;;
         esac
     done
-    issue_require_id "$arg_id"
+    board_require_id "$arg_id"
     [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
     board_call issue_delete "$arg_id" || exit $?
     if board_json_mode; then
@@ -639,8 +636,8 @@ EOF
 
 cmd_issue_comment_list() {
     [ $# -eq 1 ] || board_usage_die "<id> is required"
-    issue_require_id "$1"
-    board_doc=$(board_call issue_comment_list "$1") || exit $?
+    board_require_id "$1"
+    board_doc=$(board_call issue_comment_list "$1") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_comments
 }
 
@@ -693,9 +690,9 @@ cmd_issue_comment_add() {
     [ $# -ge 1 ] || board_usage_die "<id> is required"
     arg_id=$1
     shift
-    issue_require_id "$arg_id"
+    board_require_id "$arg_id"
     issue_comment_body_flags "$@"
-    board_doc=$(board_call issue_comment_add "$arg_id" <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call issue_comment_add "$arg_id" <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -732,10 +729,10 @@ cmd_issue_comment_edit() {
     arg_id=$1
     arg_comment=$2
     shift 2
-    issue_require_id "$arg_id"
-    issue_require_id "$arg_comment"
+    board_require_id "$arg_id"
+    board_require_id "$arg_comment"
     issue_comment_body_flags "$@"
-    board_doc=$(board_call issue_comment_edit "$arg_id" "$arg_comment" <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call issue_comment_edit "$arg_id" "$arg_comment" <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -784,8 +781,8 @@ cmd_issue_comment_delete() {
                 ;;
         esac
     done
-    issue_require_id "$arg_id"
-    issue_require_id "$arg_comment"
+    board_require_id "$arg_id"
+    board_require_id "$arg_comment"
     [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
     board_call issue_comment_delete "$arg_id" "$arg_comment" || exit $?
     if board_json_mode; then
@@ -840,8 +837,8 @@ EOF
 
 cmd_issue_link_list() {
     [ $# -eq 1 ] || board_usage_die "<id> is required"
-    issue_require_id "$1"
-    board_doc=$(board_call issue_link_list "$1") || exit $?
+    board_require_id "$1"
+    board_doc=$(board_call issue_link_list "$1") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_links
 }
 
@@ -895,15 +892,15 @@ issue_link_args() {
                 ;;
         esac
     done
-    issue_require_id "$arg_id"
-    issue_require_id "$arg_other"
+    board_require_id "$arg_id"
+    board_require_id "$arg_other"
     [ -n "$opt_type" ] || board_usage_die "--type is required"
     board_require_one_of --type "$opt_type" blocks blocked-by relates duplicates
 }
 
 cmd_issue_link_add() {
     issue_link_args "$@"
-    board_doc=$(board_call issue_link_add "$arg_id" "$arg_other" "$opt_type") || exit $?
+    board_doc=$(board_call issue_link_add "$arg_id" "$arg_other" "$opt_type") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -936,6 +933,6 @@ EOF
 
 cmd_issue_link_remove() {
     issue_link_args "$@"
-    board_doc=$(board_call issue_link_remove "$arg_id" "$arg_other" "$opt_type") || exit $?
+    board_doc=$(board_call issue_link_remove "$arg_id" "$arg_other" "$opt_type") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }

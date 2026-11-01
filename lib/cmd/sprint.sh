@@ -62,7 +62,7 @@ cmd_sprint_list() {
     done
     board_require_one_of --state "$opt_state" active future closed all
     board_require_limit "$opt_limit"
-    board_doc=$(board_call sprint_list "$opt_state" "$opt_limit") || exit $?
+    board_doc=$(board_call sprint_list "$opt_state" "$opt_limit") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_sprints
 }
 
@@ -91,7 +91,8 @@ EOF
 
 cmd_sprint_view() {
     [ $# -eq 1 ] || board_usage_die "<id> is required"
-    board_doc=$(board_call sprint_view "$1") || exit $?
+    board_require_id "$1"
+    board_doc=$(board_call sprint_view "$1") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_sprint
 }
 
@@ -117,6 +118,6 @@ EOF
 
 cmd_sprint_current() {
     [ $# -eq 0 ] || board_unexpected "$1"
-    board_doc=$(board_call sprint_current) || exit $?
+    board_doc=$(board_call sprint_current) || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_sprint
 }

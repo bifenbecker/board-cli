@@ -1,0 +1,10 @@
+query IssueView($owner: String!, $name: String!, $number: Int!, $priorityField: String!, $dueField: String!, $sprintField: String!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      ...IssueFields
+      projectItems(first: 20, includeArchived: false) {
+        nodes { ...ItemFields project { id number } }
+      }
+    }
+  }
+}

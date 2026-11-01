@@ -109,6 +109,11 @@ board_dispatch() {
     fi
     if board_fn_exists "cmd_$board_node"; then
         board_runtime_init
+        # Read here so the $(board_call ...) of a command inherits it. These work without one.
+        case $board_group in
+            init | version | self | doctor) ;;
+            *) board_config_load ;;
+        esac
         "cmd_$board_node" "$@"
         return
     fi

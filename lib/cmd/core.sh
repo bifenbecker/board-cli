@@ -175,7 +175,7 @@ cmd_config_get() {
         '' | *[!A-Za-z0-9_.-]*) board_usage_die "<key> must be a dotted key, got '$1'" ;;
     esac
     board_config_load
-    board_cg_value=$(printf '%s' "$BOARD_CONFIG_JSON" | _jq -c --arg k "$1" 'getpath($k | split(".")) // empty')
+    board_cg_value=$(printf '%s' "$BOARD_CONFIG_JSON" | _jq -c --arg k "$1" '(try getpath($k | split(".")) catch null) | if . == null then empty else . end')
     [ -n "$board_cg_value" ] || board_not_found "no key $1 in [board] of $BOARD_CONFIG_FILE"
     printf '%s\n' "$board_cg_value" | board_output .
 }
@@ -242,7 +242,7 @@ EOF
 
 cmd_list() {
     [ $# -eq 0 ] || board_unexpected "$1"
-    board_doc=$(board_call board_list) || exit $?
+    board_doc=$(board_call board_list) || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_boards
 }
 
@@ -274,7 +274,7 @@ EOF
 
 cmd_view() {
     [ $# -eq 0 ] || board_unexpected "$1"
-    board_doc=$(board_call board_view) || exit $?
+    board_doc=$(board_call board_view) || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_board
 }
 
@@ -341,9 +341,12 @@ cmd_doctor() {
             board_d_errors=$(printf '%s' "$board_d_errors" | _jq -c --arg e "login: $(sed -n 1p "$BOARD_TMP/doctor.err")" '. + [$e]')
             board_d_auth='{}'
         else
-            board_d_checks=$( (board_call doctor_checks) 2>/dev/null) || board_d_checks='{"warnings":[],"errors":[]}'
-            board_d_warnings=$(printf '%s' "$board_d_checks" | _jq -c '.warnings')
-            board_d_errors=$(printf '%s\n%s\n' "$board_d_errors" "$board_d_checks" | _jq -sc '.[0] + .[1].errors')
+            if board_d_checks=$( (board_call doctor_checks) 2>"$BOARD_TMP/doctor.err"); then
+                board_d_warnings=$(printf '%s' "$board_d_checks" | _jq -c '.warnings')
+                board_d_errors=$(printf '%s\n%s\n' "$board_d_errors" "$board_d_checks" | _jq -sc '.[0] + .[1].errors')
+            else
+                board_d_errors=$(printf '%s' "$board_d_errors" | _jq -c --arg e "checks did not run: $(sed -n 1p "$BOARD_TMP/doctor.err")" '. + [$e]')
+            fi
         fi
     else
         board_d_problem=$(printf '%s' "$board_d_problem" | sed -n 1p)
@@ -352,12 +355,13 @@ cmd_doctor() {
     board_d_doc=$(printf '%s' "$board_d_auth" | _jq -c --arg version "$board_d_version" --arg file "$board_d_file" \
         --arg kind "$board_d_kind" --arg url "$board_d_url" --argjson tools "$board_d_tools" \
         --argjson errors "$board_d_errors" --argjson warnings "$board_d_warnings" '
-        def opt: if . == "" then null else . end;
-        {version: $version,
-         ok: ($errors == [] and ($tools | all(.)) and (.authenticated // false)),
-         file: ($file | opt), kind: ($kind | opt), url: ($url | opt),
-         authenticated: (.authenticated // false), user: (.user // null),
-         tools: $tools, warnings: $warnings, errors: $errors}')
+        include "jq/common";
+        ($errors + [$tools | to_entries[] | select(.value | not) | "tool \(.key) is missing"]) as $all
+        | {version: $version,
+           ok: ($all == [] and (.authenticated // false)),
+           file: ($file | nullify), kind: ($kind | nullify), url: ($url | nullify),
+           authenticated: (.authenticated // false), user: (.user // null),
+           tools: $tools, warnings: $warnings, errors: $all}')
     printf '%s\n' "$board_d_doc" | board_output text_doctor
     printf '%s' "$board_d_doc" | _jq -e .ok >/dev/null || exit "$BOARD_EXIT_ERROR"
 }
@@ -440,7 +444,7 @@ EOF
 
 cmd_auth_status() {
     [ $# -eq 0 ] || board_unexpected "$1"
-    board_doc=$(board_call auth_status) || exit $?
+    board_doc=$(board_call auth_status) || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_auth
 }
 
@@ -480,7 +484,7 @@ EOF
 cmd_api() {
     [ $# -gt 0 ] || board_usage_die "<args...> are required"
     if [ -n "${BOARD_JQ:-}" ]; then
-        board_doc=$(board_call api_call "$@") || exit $?
+        board_doc=$(board_call api_call "$@") || board_fail "$?" "$board_doc"
         printf '%s\n' "$board_doc" | board_output .
     else
         board_call api_call "$@" || exit $?

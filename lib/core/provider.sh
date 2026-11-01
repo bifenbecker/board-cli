@@ -30,8 +30,14 @@ board_call() {
     board_call_name=$1
     shift
     board_config_load
+    case $board_call_name in
+        *_create | *_edit | *_move | *_close | *_reopen | *_delete | *_add | *_remove | *_rename) BOARD_WRITE=1 ;;
+    esac
     board_provider_load core
     board_provider_load "${board_call_name%%_*}"
+    if board_fn_exists "${BOARD_KIND}_env"; then
+        "${BOARD_KIND}_env"
+    fi
     if ! board_fn_exists "${BOARD_KIND}_$board_call_name"; then
         board_call_why=$(board_unsupported_reason "$board_call_name")
         board_warn "board ${BOARD_PATH:-$board_call_name} is not supported on $BOARD_KIND${board_call_why:+: $board_call_why}"

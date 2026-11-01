@@ -33,7 +33,18 @@ def category_of($cfg; $name; $native):
 def make_status($cfg):
     {id: (if .id == null then null else (.id | tostring) end),
      name: .name,
-     category: category_of($cfg; .name; .native)};
+     category: (if .name == null then .native else category_of($cfg; .name; .native) end)};
+
+# For 'board init' only, which writes the guess into a file a person reads. Never used at run time.
+def guess_category:
+    if test("cancel|won.?t|reject|отмен"; "i") then "canceled"
+    elif test("done|closed|complete|resolved|готов|закрыт"; "i") then "done"
+    elif test("progress|review|doing|testing|qa|работ|провер"; "i") then "in_progress"
+    elif test("todo|to do|backlog|new|open|triage|ready|нов|сделать"; "i") then "todo"
+    else null end;
+
+def make_link:
+    {type: .type, id: (.id | tostring)};
 
 def make_issue($cfg):
     {id: (.id | tostring),
@@ -49,7 +60,7 @@ def make_issue($cfg):
      priority: (.priority // null),
      parent: (if .parent == null then null else (.parent | tostring) end),
      subtasks: ((.subtasks // []) | map(tostring)),
-     links: (.links // []),
+     links: ((.links // []) | map(make_link)),
      sprint: (.sprint // null),
      milestone: (.milestone // null),
      due_date: (.due_date // null),
@@ -64,9 +75,6 @@ def make_comment:
      url: (.url // null),
      created_at: (.created_at | utc),
      updated_at: (.updated_at | utc)};
-
-def make_link:
-    {type: .type, id: (.id | tostring)};
 
 def make_label:
     {id: (if .id == null then null else (.id | tostring) end),

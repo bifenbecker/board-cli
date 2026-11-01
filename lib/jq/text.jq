@@ -39,13 +39,13 @@ def text_labels: .[] | .name;
 
 def text_members: .[] | "\(.id)\t\(.name)";
 
-def text_sprints: .[] | "\(.id)\t\(.state)\t\(.name)\t\(.start_date | dash) .. \(.end_date | dash)";
-
 def text_sprint: "\(.id)\t\(.state)\t\(.name)\t\(.start_date | dash) .. \(.end_date | dash)";
 
-def text_milestones: .[] | "\(.id)\t\(.state)\t\(.name)\t\(.due_date | dash)";
+def text_sprints: .[] | text_sprint;
 
 def text_milestone: "\(.id)\t\(.state)\t\(.name)\t\(.due_date | dash)";
+
+def text_milestones: .[] | text_milestone;
 
 def text_boards: .[] | "\(.id)\t\(.name)\t\(.url | dash)";
 

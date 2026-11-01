@@ -46,7 +46,7 @@ EOF
 
 cmd_status_list() {
     [ $# -eq 0 ] || board_unexpected "$1"
-    board_doc=$(board_call status_list) || exit $?
+    board_doc=$(board_call status_list) || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_statuses
 }
 
@@ -97,7 +97,7 @@ cmd_status_add() {
     [ -n "$arg_name" ] || board_usage_die "<name> is required"
     [ -n "$opt_category" ] || board_usage_die "--category is required"
     board_require_one_of --category "$opt_category" todo in_progress done canceled
-    board_doc=$(board_call status_add "$arg_name" "$opt_category") || exit $?
+    board_doc=$(board_call status_add "$arg_name" "$opt_category") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output .name
 }
 
@@ -132,7 +132,7 @@ EOF
 cmd_status_rename() {
     [ $# -eq 2 ] || board_usage_die "<name> and <new-name> are required"
     [ -n "$1" ] && [ -n "$2" ] || board_usage_die "names must not be empty"
-    board_doc=$(board_call status_rename "$1" "$2") || exit $?
+    board_doc=$(board_call status_rename "$1" "$2") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output .name
 }
 

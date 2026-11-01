@@ -48,7 +48,7 @@ EOF
 
 cmd_label_list() {
     [ $# -eq 0 ] || board_unexpected "$1"
-    board_doc=$(board_call label_list) || exit $?
+    board_doc=$(board_call label_list) || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_labels
 }
 
@@ -112,16 +112,17 @@ label_flags() {
 label_intent() {
     _jq -nc --arg name "$arg_name" --arg new_name "$opt_new_name" --arg color "$opt_color" \
         --arg description "$opt_description" --arg description_set "$opt_description_set" '
-        def opt: if . == "" then null else . end;
-        {name: $name, new_name: ($new_name | opt), color: ($color | opt),
+        include "jq/common";
+        {name: $name, new_name: ($new_name | nullify), color: ($color | nullify),
          description: (if $description_set == "" then null else $description end)}'
 }
 
 cmd_label_create() {
     arg_name='' opt_new_name=''
     label_flags "$@"
+    [ -z "$opt_new_name" ] || board_usage_die "--name is for 'board label edit'"
     label_intent >"$BOARD_TMP/intent"
-    board_doc=$(board_call label_create <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call label_create <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output .name
 }
 
@@ -161,7 +162,7 @@ cmd_label_edit() {
     label_flags "$@"
     [ -n "$opt_new_name$opt_color$opt_description_set" ] || board_usage_die "nothing to change: pass at least one flag"
     label_intent >"$BOARD_TMP/intent"
-    board_doc=$(board_call label_edit <"$BOARD_TMP/intent") || exit $?
+    board_doc=$(board_call label_edit <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output .name
 }
 

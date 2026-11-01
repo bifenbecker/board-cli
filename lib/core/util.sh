@@ -52,6 +52,16 @@ board_partial() {
     exit "$BOARD_EXIT_PARTIAL"
 }
 
+# Ends a command whose adapter call failed, inside $(...). Exit 6 promises the id on stdout, and
+# the id went into the variable that captured the call.
+# Usage: board_doc=$(board_call ...) || board_fail "$?" "$board_doc"
+board_fail() {
+    if [ "$1" = "$BOARD_EXIT_PARTIAL" ] && [ -n "$2" ]; then
+        printf '%s\n' "$2"
+    fi
+    exit "$1"
+}
+
 board_require() {
     command -v "$1" >/dev/null 2>&1 || board_die "$1 is required${2:+ ($2)}; install it and retry"
 }

@@ -59,12 +59,21 @@ init_section() {
          else empty end)'
 }
 
+# True when the file has this section header, whether or not it holds a key. An empty one counts:
+# adding a second would make the file invalid TOML.
+init_has_section() {
+    grep -Eq "^[[:space:]]*\\[$1\\][[:space:]]*(#.*)?\$" "$init_file"
+}
+
 # Prints the subsections of the discovered board that the file lacks.
 init_missing_sections() {
-    init_ms_have=$1
-    printf '%s' "$init_doc" | _jq -c --argjson have "$init_ms_have" '
-        {board: {}} + (if $have.target then {} else {target} end)
-        + (if $have.statuses then {} else {statuses, unplaced} end)' | init_section | sed '1d'
+    init_ms_target=false
+    init_ms_statuses=false
+    if init_has_section 'board\.target'; then init_ms_target=true; fi
+    if init_has_section 'board\.statuses'; then init_ms_statuses=true; fi
+    printf '%s' "$init_doc" | _jq -c --argjson t "$init_ms_target" --argjson s "$init_ms_statuses" '
+        {board: {}} + (if $t then {} else {target} end) + (if $s then {} else {statuses, unplaced} end)' |
+        init_section | sed '1d'
 }
 
 cmd_init() {
@@ -89,9 +98,9 @@ cmd_init() {
     init_doc=$(board_call_kind init_discover "$opt_url" "$opt_repo") || exit $?
     init_text=$(printf '%s' "$init_doc" | init_section)
 
-    if init_file=$(board_config_find 2>/dev/null); then
-        :
-    else
+    if [ -n "${WORKFLOW_FILE:-}" ]; then
+        init_file=$WORKFLOW_FILE
+    elif ! init_file=$(board_config_find 2>/dev/null); then
         init_file=workflow.toml
     fi
     init_written=true
@@ -104,12 +113,16 @@ cmd_init() {
         init_conflict=$(printf '%s\n%s\n' "$init_have" "$init_doc" | _jq -sr '
             .[0] as $have | .[1].board | to_entries
             | map(select($have[.key] != null and $have[.key] != .value) | .key) | join(", ")')
+        if [ -z "$init_conflict" ] && init_has_section board &&
+            ! printf '%s' "$init_have" | _jq -e '.kind and .url' >/dev/null; then
+            init_conflict='it lacks kind or url'
+        fi
         if [ -n "$init_conflict" ]; then
             printf '%s\n' "$init_text"
             board_usage_die "$init_file declares another board ($init_conflict): nothing written, merge the section above by hand"
         fi
-        if printf '%s' "$init_have" | _jq -e 'has("kind")' >/dev/null; then
-            init_extra=$(init_missing_sections "$init_have")
+        if init_has_section board; then
+            init_extra=$(init_missing_sections)
         else
             init_extra=$(printf '\n%s' "$init_text")
         fi

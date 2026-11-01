@@ -48,6 +48,6 @@ cmd_member_list() {
             *) board_unexpected "$1" ;;
         esac
     done
-    board_doc=$(board_call member_list "$opt_search") || exit $?
+    board_doc=$(board_call member_list "$opt_search") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_members
 }

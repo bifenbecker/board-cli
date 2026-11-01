@@ -1,0 +1,3 @@
+mutation UpdateDraft($input: UpdateProjectV2DraftIssueInput!) {
+  updateProjectV2DraftIssue(input: $input) { draftIssue { id } }
+}

@@ -1,0 +1,3 @@
+mutation SetParent($issueId: ID!, $subIssueId: ID!) {
+  addSubIssue(input: {issueId: $issueId, subIssueId: $subIssueId, replaceParent: true}) { issue { id } }
+}

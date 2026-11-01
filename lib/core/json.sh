@@ -8,11 +8,11 @@ board_json_mode() {
 # --jq filters the JSON, --json prints it, and otherwise the text filter renders it.
 board_output() {
     if [ -n "${BOARD_JQ:-}" ]; then
-        _jq -r "$BOARD_JQ"
+        _jq -r "$BOARD_JQ" || board_usage_die "--jq failed on this output: $BOARD_JQ"
     elif board_json_mode; then
-        _jq .
+        _jq . || board_die "the answer is not JSON"
     else
-        _jq -r "include \"jq/text\"; $1"
+        _jq -r "include \"jq/text\"; $1" || board_die "the answer is not what was expected"
     fi
 }
 

@@ -1,0 +1,3 @@
+mutation ClearParent($issueId: ID!, $subIssueId: ID!) {
+  removeSubIssue(input: {issueId: $issueId, subIssueId: $subIssueId}) { issue { id } }
+}
