@@ -25,6 +25,7 @@ gitlab_env() {
     GL_CLI=glab
     GL_BOARD=''
     if [ -n "${BOARD_URL:-}" ]; then
+        board_require_trusted_host gitlab.com
         gitlab_project_of "$BOARD_URL"
         [ -n "$GL_PATH" ] || board_usage_die "[board] url must name a project: https://$BOARD_HOST/<group>/<project>"
         GL_BOARD=$(printf '%s' "$BOARD_CONFIG_JSON" | _jq -r '.target.board // "" | tostring')
