@@ -7,7 +7,7 @@
 # Prints the path of workflow.toml, from WORKFLOW_FILE or the nearest one at or above the cwd.
 board_config_find() {
     if [ -n "${WORKFLOW_FILE:-}" ]; then
-        WORKFLOW_FILE=$(printf '%s' "$WORKFLOW_FILE" | tr '\\' '/')
+        WORKFLOW_FILE=$(printf '%s' "$WORKFLOW_FILE" | tr '\134' '/')
         [ -f "$WORKFLOW_FILE" ] || return 1
         printf '%s' "$WORKFLOW_FILE"
         return 0
@@ -179,7 +179,7 @@ board_config_load() {
     esac
     case $BOARD_CLI_CONFIG in
         '' | /* | [A-Za-z]:*) ;;
-        ~/*) BOARD_CLI_CONFIG=$HOME/${BOARD_CLI_CONFIG#~/} ;;
+        \~/*) BOARD_CLI_CONFIG=$HOME/${BOARD_CLI_CONFIG#\~/} ;;
         *) BOARD_CLI_CONFIG=$BOARD_ROOT/$BOARD_CLI_CONFIG ;;
     esac
     BOARD_CONFIG_LOADED=1
