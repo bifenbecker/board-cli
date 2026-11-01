@@ -123,7 +123,10 @@ OUTPUT
 PLATFORM NOTES
   GitHub: lists the items of the project in project order, draft items included, pull requests
           left out. --search reads every page it has to, so it is slower on a big project.
-  GitLab: --category needs [board.statuses]: an open issue with no status label has no category.
+  GitLab: an issue with no status label reads as todo while open and as done once closed, with a
+          null status name. A closed issue that kept a status label reads as that status. done and
+          canceled filter on board's side, so they read issues until --limit is met. --priority
+          needs [board.priority]: exit 3 otherwise. parent is null unless --parent is given.
   Linear: --type is not supported; there are no issue types.
 
 EXAMPLES
@@ -274,7 +277,9 @@ PLATFORM NOTES
           types exist only in organisations: exit 3 for --type elsewhere.
   Jira: description is converted from markdown to wiki markup, best effort. One assignee only.
   Linear: one assignee only. --type is not supported.
-  GitLab: on Free one assignee only.
+  GitLab: on Free one assignee only. Without --status the issue starts in the first todo status of
+          [board.statuses]. --parent makes a Task, the only type that can have a parent; another
+          --type with --parent is exit 3. --priority needs [board.priority]: exit 3 otherwise.
 
 EXAMPLES
   board issue create --title "Login fails" --label bug --priority high
@@ -349,6 +354,9 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub: a draft item takes only --title, --body and --status.
+  GitLab: only a Task can have a parent: --parent on an Issue is exit 3 with the reason. Add
+          --type Task to convert it in the same call. --priority needs [board.priority]: exit 3
+          otherwise.
 
 EXAMPLES
   board issue edit KAN-1 --title "A better title"
@@ -420,8 +428,8 @@ PLATFORM NOTES
         ones it has.
   GitHub: the project's built-in workflows may act on the move a few seconds later: Done closes the
           issue, and closing sets Done. Read the issue again before relying on a final state.
-  GitLab: on Free a status is a label. board removes the other status labels, and a status mapped
-          to done also closes the issue.
+  GitLab: on Free a status is a label. board removes the other status labels in the same call. A
+          status mapped to done or canceled also closes the issue, and any other reopens it.
 
 EXAMPLES
   board issue move KAN-1 "In Progress"
@@ -464,6 +472,7 @@ PLATFORM NOTES
   Jira: --reason canceled needs a status declared canceled in [board.statuses].
   GitHub: --reason canceled closes the issue as not planned. The built-in workflow "Item closed"
           may then set the status to Done.
+  GitLab: with no status declared for the reason, the issue just closes and loses its status label.
 
 EXAMPLES
   board issue close KAN-1

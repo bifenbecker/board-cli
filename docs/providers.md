@@ -60,11 +60,40 @@ Tool: `glab`, tested on 1.110.0. Always pass `--hostname`: glab may also be logg
   `relates_to` works on Free.
 - Pagination headers: `X-Next-Page`, `X-Total`, `X-Per-Page`, seen with `glab api -i`.
 - Notes include system notes: filter on `system == false`.
-- `glab api` errors end in `(HTTP <code>)` on stderr and print the JSON body on stdout. A bad token
-  is 401. A missing issue is 404. `glab api graphql` exits 0 with `project: null` when the project
-  is missing or private: check for it.
+- `glab api` prints the JSON body on stdout and exits 1 on an error. A bad token is 401. A missing
+  issue is 404. `glab api graphql` exits 0 with `project: null` when the project is missing or
+  private: check for it.
+- The HTTP code on stderr comes in three forms: `glab: <message> (HTTP <code>)`; `glab: HTTP <code>`
+  when the body says `error` instead of `message`; and `glab: map[message:map[...]]+`, with no code
+  at all, when `message` is an object of validation errors.
+- `glab api graphql` drops the code too: a bad token is exit 1, `{"errors":[{"message":"Invalid
+  token"}]}`, and `glab: Invalid token`. Ask `user` to tell it from a bad query.
+- A host glab has no login for prints a framed `Unauthenticated.` with no code. It says the same for
+  a host that does not exist: it never gets as far as the network.
 - Work item types on Free: Incident, Issue, Task, Ticket.
-- The canonical issue URL is `/-/work_items/<iid>`.
+- The canonical issue URL is `/-/work_items/<iid>`, and `web_url` already is that.
+- Scoped labels need a paid tier: on Free `status::todo` is a plain label, and GitLab does not make
+  it exclusive. Labels are case-sensitive. A name cannot hold a comma, so a comma list is safe.
+- `state_event: close` on a closed issue and `reopen` on an open one answer 200 and change nothing.
+- `due_date: null`, `milestone_id: 0` and `assignee_ids: []` clear a field. Assignees are numeric
+  ids, the whole list at once.
+- A work item's global id is `gid://gitlab/WorkItem/<id>`, with the REST `id`, not the `iid`.
+- Hierarchy on Free is Issue => Task. `workItemUpdate` refuses an Issue under an Issue with exit 0
+  and text in the payload: `errors: ["#5 cannot be added: it's not allowed to add this type of
+  parent item"]`. `parentId: null` clears a parent, and succeeds when there is none.
+- REST creates a Task with `issue_type: task` but refuses to change an Issue to one: `can not be
+  changed to Task`. `workItemConvert` does it, and then the Issue can have a parent.
+- Links: `target_project_id` must be the numeric id; the encoded path that works in a URL is `404
+  Project Not Found`. A second link between two issues, in either direction, is 409 `Issue(s) already
+  assigned`. `references.relative` is `#9` for an issue of the same project.
+- Iterations on Free: REST `projects/:id/iterations` is a bare `403 Forbidden`, with nothing about a
+  license, so it reads like a missing permission. No work item type has an `ITERATION` widget: ask
+  `workItemTypes`.
+- `POST labels` requires `color`. A label created by first use gets `#6699cc`.
+- Renaming a label keeps its list. Deleting a label deletes its list. A second list for one label
+  is `Label has already been taken`.
+- `projects/:id/milestones/:id` takes the global `id`, while the URL of a milestone shows the `iid`.
+- An iid is not reused after its issue is deleted.
 
 ## Linear
 
