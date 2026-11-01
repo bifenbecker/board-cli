@@ -9,6 +9,8 @@ set -u
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 [ $# -gt 0 ] || set -- github gitlab linear jira
+BOARD_JIRA_HOSTS=work-40585442.atlassian.net
+export BOARD_JIRA_HOSTS
 
 passed=0
 failed=0

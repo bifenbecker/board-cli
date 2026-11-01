@@ -5,11 +5,18 @@
 
 BOARD_LOADED_GROUPS=
 
-# The model and this board's shapes, prepended to an adapter's filters. Not an include inside
-# shape.jq: jq 1.8.0 aborts on a function that an included module gets from another include.
+# The model and this board's .jq files, prepended to an adapter's filters, shape.jq last. Not an
+# include inside shape.jq: jq 1.8.0 aborts on a function an included module gets from another include.
 board_lib_load() {
     [ -z "${BOARD_LIB:-}" ] || return 0
-    BOARD_LIB=$(cat "$BOARD_HOME/lib/jq/common.jq" "$BOARD_HOME/lib/$BOARD_KIND/shape.jq")
+    set -- "$BOARD_HOME/lib/jq/common.jq"
+    for board_ll_file in "$BOARD_HOME/lib/$BOARD_KIND"/*.jq; do
+        case $board_ll_file in
+            */shape.jq) ;;
+            *) set -- "$@" "$board_ll_file" ;;
+        esac
+    done
+    BOARD_LIB=$(cat "$@" "$BOARD_HOME/lib/$BOARD_KIND/shape.jq")
 }
 
 board_provider_load() {

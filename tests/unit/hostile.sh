@@ -1,4 +1,4 @@
-# shellcheck shell=sh disable=SC2329
+# shellcheck shell=sh disable=SC2317,SC2329
 
 # Findings of the second adversarial review, kept as tests. workflow.toml comes with a repository,
 # and a board's answer comes from a network: neither may run anything or hang board.
