@@ -31,7 +31,10 @@ OUTPUT
 
 PLATFORM NOTES
   Linear: a project URL narrows the board to that project.
-  Jira: the host must equal server in the jira-cli config.
+  Jira: the host must be one you named outside the repository: the host of server in
+        JIRA_CONFIG_FILE or ~/.config/.jira/.config.yml, or a host in BOARD_JIRA_HOSTS
+        (space-separated). Anything else is exit 5 with no request made. Statuses keep Jira's own
+        categories, so only one that reads as canceled is written to [board.statuses].
 
 EXAMPLES
   board init --url https://linear.app/3kd/project/test-982b67e1e776/overview
