@@ -11,9 +11,7 @@ github_milestone_body() {
 github_milestone_list() {
     github_env
     github_ml_doc=$(github_rest_all "repos/$GH_REPO/milestones?state=$1&per_page=100") || return $?
-    printf '%s' "$github_ml_doc" | _jq -c --arg l "$2" '
-        '"$BOARD_LIB"'
-        map(gh_milestone) | if $l == "all" then . else .[:($l | tonumber)] end'
+    printf '%s' "$github_ml_doc" | _jq -c ''"$BOARD_LIB"' map(gh_milestone)' | board_cut "$2"
 }
 
 github_milestone_view() {
