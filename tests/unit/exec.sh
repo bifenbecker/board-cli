@@ -72,3 +72,14 @@ test_urlencode_handles_cyrillic_and_spaces() {
     exec_load
     t_eq "$(board_urlencode 'a b/я')" 'a%20b%2F%D1%8F' encoded
 }
+
+test_cut_warns_when_it_truncates() {
+    exec_load
+    . "$BOARD_HOME/lib/core/gql.sh"
+    printf '[1,2,3]' >in
+    board_cut 2 <in >out 2>err
+    t_eq "$(cat out)" '[1,2]' list
+    t_contains "$(cat err)" 'more exist' warning
+    board_cut 3 <in >out 2>err
+    t_eq "$(cat err)" '' 'no warning at the limit'
+}

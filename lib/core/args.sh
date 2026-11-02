@@ -17,10 +17,10 @@ board_unexpected() {
 # Usage: board_read_body_file <path|->  — sets BOARD_BODY.
 board_read_body_file() {
     if [ "$1" = - ]; then
-        BOARD_BODY=$(cat)
+        BOARD_BODY=$(cat) || board_die "cannot read stdin"
     else
-        [ -f "$1" ] || board_die "file not found: $1"
-        BOARD_BODY=$(cat -- "$1")
+        [ -f "$1" ] || board_usage_die "file not found: $1"
+        BOARD_BODY=$(cat -- "$1") || board_die "cannot read $1"
     fi
     BOARD_BODY_SET=1
 }
@@ -28,6 +28,13 @@ board_read_body_file() {
 board_require_body() {
     [ -n "${BOARD_BODY_SET:-}" ] || board_usage_die "${1:-text} is required: pass --body <text> or --body-file <path|->"
     [ -n "$BOARD_BODY" ] || board_usage_die "${1:-text} is empty"
+}
+
+board_require_id() {
+    [ -n "$1" ] || board_usage_die "<id> is required"
+    case $1 in
+        -*) board_usage_die "<id> must not start with a dash, got '$1'" ;;
+    esac
 }
 
 board_require_int() {

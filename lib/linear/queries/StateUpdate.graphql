@@ -1,0 +1,3 @@
+mutation StateUpdate {
+  workflowStateUpdate(id: $id, input: $input) { success workflowState { id name type } }
+}

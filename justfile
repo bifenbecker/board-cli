@@ -9,7 +9,7 @@ help:
 
 # Lint every shell file, then check help completeness and the provider contract
 lint:
-    shellcheck bin/board install.sh lib/*/*.sh scripts/*.sh tests/*.sh tests/lib/*.sh tests/unit/*.sh tests/fake/*
+    shellcheck bin/board install.sh lib/*/*.sh scripts/*.sh tests/*.sh tests/lib/*.sh tests/unit/*.sh tests/contract/*.sh tests/live/*.sh tests/fake/*
     sh scripts/check-help.sh
     sh scripts/check-contract.sh
 
@@ -17,7 +17,7 @@ lint:
 test *args:
     sh tests/run.sh "$@"
 
-# Run the live suite against the four test boards; it creates and deletes issues. Usage: just live [<kind>...]
+# Run the live suite against the test boards; it creates and deletes issues. Usage: just live [<kind>...]
 live *args:
     sh tests/live/run.sh "$@"
 

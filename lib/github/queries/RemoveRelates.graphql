@@ -1,0 +1,3 @@
+mutation RemoveRelates($issueId: ID!, $relatedIssueId: ID!) {
+  removeRelatesTo(input: {issueId: $issueId, relatedIssueId: $relatedIssueId}) { clientMutationId }
+}

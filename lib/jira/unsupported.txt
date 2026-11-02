@@ -1,0 +1,6 @@
+status_add statuses belong to workflows, which differ by project type and need an administrator
+status_rename statuses belong to workflows, which differ by project type and need an administrator
+status_delete statuses belong to workflows, which differ by project type and need an administrator
+label_create a label is free text on an issue: it exists once an issue carries it
+label_edit a label is free text on each issue: there is no label object to change
+label_delete a label is free text on each issue: there is no label object to delete

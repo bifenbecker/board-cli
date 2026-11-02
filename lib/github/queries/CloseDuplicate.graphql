@@ -1,0 +1,3 @@
+mutation CloseDuplicate($issueId: ID!, $duplicateIssueId: ID!) {
+  closeIssue(input: {issueId: $issueId, stateReason: DUPLICATE, duplicateIssueId: $duplicateIssueId}) { issue { id } }
+}

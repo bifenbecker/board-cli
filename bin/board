@@ -21,8 +21,13 @@ if [ -x /usr/bin/cygpath ]; then
 fi
 export BOARD_HOME
 
+# The real stdout, kept for the id exit 6 promises: adapters run their calls inside $(...).
+exec 9>&1
+
 . "$BOARD_HOME/lib/core/util.sh"
 . "$BOARD_HOME/lib/core/exec.sh"
+. "$BOARD_HOME/lib/core/gql.sh"
+. "$BOARD_HOME/lib/core/http.sh"
 . "$BOARD_HOME/lib/core/config.sh"
 . "$BOARD_HOME/lib/core/json.sh"
 . "$BOARD_HOME/lib/core/args.sh"

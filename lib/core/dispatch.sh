@@ -9,6 +9,9 @@ board_main() {
     BOARD_BODY=''
     BOARD_BODY_SET=''
     BOARD_SHOW_VERSION=''
+    # Inherited values would skip the steps they stand for.
+    BOARD_CONFIG_LOADED=''
+    BOARD_TMP=''
 
     # Pull global flags out of the argument list, wherever they are. The list is rotated:
     # each argument is shifted off the front and, unless it is global, appended to the back.
@@ -26,6 +29,17 @@ board_main() {
                     shift
                     board_n=$((board_n - 1))
                 done
+                ;;
+            # Free text is taken whole: a body of "--help" must be posted, not print help.
+            -b | --body | -t | --title | -S | --search | -d | --description)
+                set -- "$@" "$board_a"
+                board_kept=$((board_kept + 1))
+                if [ "$board_n" -gt 0 ]; then
+                    set -- "$@" "$1"
+                    board_kept=$((board_kept + 1))
+                    shift
+                    board_n=$((board_n - 1))
+                fi
                 ;;
             --json) BOARD_JSON=1 ;;
             --jq)
@@ -72,6 +86,11 @@ board_runtime_init() {
     board_timeout_probe
     board_require jq
     board_tmp_init
+    # Compiled now, so a typo cannot surface after a write has gone through.
+    if [ -n "$BOARD_JQ" ]; then
+        _jq -n "empty | ($BOARD_JQ
+)" >/dev/null 2>"$BOARD_TMP/jq.err" || board_usage_die "--jq: $(sed -n 1p "$BOARD_TMP/jq.err")"
+    fi
 }
 
 board_dispatch() {
@@ -109,6 +128,11 @@ board_dispatch() {
     fi
     if board_fn_exists "cmd_$board_node"; then
         board_runtime_init
+        # Read here so the $(board_call ...) of a command inherits it. These work without one.
+        case $board_group in
+            init | version | self | doctor) ;;
+            *) board_config_load ;;
+        esac
         "cmd_$board_node" "$@"
         return
     fi

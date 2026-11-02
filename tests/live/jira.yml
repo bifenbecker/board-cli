@@ -1,0 +1,10 @@
+installation: Cloud
+server: https://work-40585442.atlassian.net
+login: bulgakovra.w@gmail.com
+auth_type: basic
+project:
+  key: KAN
+board:
+  id: 1
+  name: KAN board
+  type: simple

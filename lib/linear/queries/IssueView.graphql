@@ -1,0 +1,15 @@
+query IssueView {
+  issue(id: $id) {
+    ...IssueRow
+    labels(first: 250) { pageInfo { hasNextPage endCursor } nodes { id name } }
+    children(first: 250) { pageInfo { hasNextPage endCursor } nodes { identifier } }
+    relations(first: 250) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id type relatedIssue { id identifier } }
+    }
+    inverseRelations(first: 250) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id type issue { id identifier } }
+    }
+  }
+}

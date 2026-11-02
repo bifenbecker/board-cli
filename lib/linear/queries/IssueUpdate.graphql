@@ -1,0 +1,3 @@
+mutation IssueUpdate {
+  issueUpdate(id: $id, input: $input) { success issue { updatedAt } }
+}

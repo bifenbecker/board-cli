@@ -52,8 +52,13 @@ t_jq() {
     t_eq "$t_jq_got" "$3" "$2"
 }
 
+# -b only where Windows needs it: a retry without it would read an empty stdin and pass.
 t_jq_cmd() {
-    jq -b "$@" 2>/dev/null || jq "$@"
+    if [ -x /usr/bin/cygpath ]; then
+        jq -b "$@"
+    else
+        jq "$@"
+    fi
 }
 
 # Writes a workflow.toml into the test's directory, from stdin, and points board at it.

@@ -1,0 +1,14 @@
+mutation CommentCreate {
+  commentCreate(input: $input) {
+    success
+    comment {
+      id
+      body
+      url
+      createdAt
+      updatedAt
+      user { id name displayName }
+      externalUser { id name }
+    }
+  }
+}

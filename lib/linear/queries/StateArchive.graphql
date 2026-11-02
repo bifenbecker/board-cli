@@ -1,0 +1,3 @@
+mutation StateArchive {
+  workflowStateArchive(id: $id) { success }
+}

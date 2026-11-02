@@ -1,0 +1,8 @@
+{
+  "id": "string",
+  "name": "string",
+  "description": "string|null",
+  "state": "string",
+  "due_date": "string|null",
+  "url": "string|null"
+}

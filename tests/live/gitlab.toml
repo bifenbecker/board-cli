@@ -1,0 +1,24 @@
+# The GitLab test board, on the Free tier. Everything on it may be created and deleted, except the
+# labels below and their lists on the board, which the board needs. To set them up again, once:
+#   WORKFLOW_FILE=tests/live/gitlab.toml sh bin/board status add <status> --category <category>
+#   WORKFLOW_FILE=tests/live/gitlab.toml sh bin/board label create <priority label>
+[board]
+kind      = "gitlab"
+cli       = "glab"
+url       = "https://gitlab.com/bulgakovra.w/test-board-cli"
+project   = "#"
+issue_uri = "/-/work_items/{ticket}"
+
+[board.target]
+board = 11734286
+
+[board.statuses]
+"status::todo"        = "todo"
+"status::in-progress" = "in_progress"
+"status::done"        = "done"
+
+[board.priority]
+urgent = "priority::urgent"
+high   = "priority::high"
+medium = "priority::medium"
+low    = "priority::low"

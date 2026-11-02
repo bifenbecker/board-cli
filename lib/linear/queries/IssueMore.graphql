@@ -1,0 +1,20 @@
+query IssueMore {
+  issue(id: $id) {
+    labels(first: 250, after: $labelsAfter) @include(if: $labelsMore) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id name }
+    }
+    children(first: 250, after: $childrenAfter) @include(if: $childrenMore) {
+      pageInfo { hasNextPage endCursor }
+      nodes { identifier }
+    }
+    relations(first: 250, after: $relationsAfter) @include(if: $relationsMore) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id type relatedIssue { id identifier } }
+    }
+    inverseRelations(first: 250, after: $inverseRelationsAfter) @include(if: $inverseRelationsMore) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id type issue { id identifier } }
+    }
+  }
+}

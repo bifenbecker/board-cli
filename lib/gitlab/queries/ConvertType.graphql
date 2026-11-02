@@ -1,0 +1,3 @@
+mutation ConvertType($id: WorkItemID!, $type: WorkItemsTypeID!) {
+  workItemConvert(input: {id: $id, workItemTypeId: $type}) { errors }
+}

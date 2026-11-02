@@ -1,0 +1,3 @@
+mutation DeleteItem($projectId: ID!, $itemId: ID!) {
+  deleteProjectV2Item(input: {projectId: $projectId, itemId: $itemId}) { deletedItemId }
+}

@@ -1,0 +1,6 @@
+mutation MilestoneUpdate {
+  projectMilestoneUpdate(id: $id, input: $input) {
+    success
+    projectMilestone { id name description status targetDate }
+  }
+}
