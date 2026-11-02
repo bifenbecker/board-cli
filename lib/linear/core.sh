@@ -8,8 +8,6 @@ LN_READY=''
 LN_SETTLE_SECONDS=20
 
 linear_env() {
-    # Exit 6 promises the id on stdout, and the transport runs inside $(...) and >/dev/null.
-    exec 4>&1
     [ -z "${LN_READY:-}" ] || return 0
     LN_CLI=linear
     LN_TEAM=${BOARD_PROJECT:-}
@@ -44,7 +42,7 @@ linear_require_team() {
 # through, so repeating it blindly could do it twice.
 linear_unknown_write() {
     [ -n "${BOARD_WRITE:-}" ] || return "$BOARD_EXIT_ERROR"
-    [ -z "${BOARD_WRITE_ID:-}" ] || printf '%s\n' "$BOARD_WRITE_ID" >&4
+    [ -z "${BOARD_WRITE_ID:-}" ] || board_print_id "$BOARD_WRITE_ID"
     board_warn "the write may have gone through. Check before repeating it"
     return "$BOARD_EXIT_PARTIAL"
 }
@@ -53,7 +51,7 @@ linear_unknown_write() {
 # raised, so both are read; anything else is text from the tool on stderr.
 linear_check() {
     if [ "$1" = "$BOARD_EXIT_TIMEOUT" ]; then
-        board_timed_out >&4
+        board_timed_out
         return $?
     fi
     linear_ck_doc=$(_jq -Rsc ''"$BOARD_LIB"' ln_failure' <"$BOARD_OUT") || linear_ck_doc=''
@@ -110,7 +108,7 @@ linear_run() {
         set -- --workspace "$LN_WORKSPACE" "$@"
     fi
     linear_rn_status=0
-    board_exec "$LN_CLI" api "$@" 4>&- || linear_rn_status=$?
+    board_exec "$LN_CLI" api "$@" || linear_rn_status=$?
     linear_check "$linear_rn_status"
 }
 
