@@ -25,6 +25,10 @@ jobs:
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just,git-cliff
+      - name: Install forge
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/bifenbecker/forge-cli/v0.2.0/install.sh | sh -s -- --version v0.2.0
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
       - name: Identify the committer
         run: |
           git config user.name "github-actions[bot]"
