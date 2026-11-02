@@ -1,6 +1,6 @@
 #!/bin/sh
 . "$(dirname -- "$0")/_fake.sh"
-fake_log "gh $*"
+fake_log "gh ${GH_HOST:+GH_HOST=$GH_HOST }$*"
 if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
     fake_body=$(fake_stdin)
     fake_reply gh "$(fake_operation "$(printf '%s' "$fake_body" | jq -r .query)")"
