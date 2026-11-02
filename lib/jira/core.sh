@@ -378,7 +378,7 @@ jira_board_view() {
                columns: $c, statuses: $s}'
         return 0
     fi
-    jira_bv_doc=$(jira_project) || return $?
+    jira_bv_doc=$(jira_project "$JIRA_PROJECT") || return $?
     printf '%s' "$jira_bv_doc" | _jq -c --argjson s "$jira_bv_statuses" --arg base "$JIRA_BASE" '
         {id: .key, name, kind: "jira", url: "\($base)/browse/\(.key)",
          columns: ($s | map({name, statuses: [.name]})), statuses: $s}'
