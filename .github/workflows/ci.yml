@@ -33,13 +33,17 @@ jobs:
           pipx install commit-check==2.15.1
           printf '%s\n' "$TITLE" | commit-check --message
 
-  test:
+  # One job per OS and suite, so the slow process start of macOS and Windows is paid in parallel.
+  # core is every test file the other suites leave out; a new adapter's tests land there until
+  # it gets a suite of its own here and in the case below.
+  unit:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        suite: [core, github, gitlab, jira, linear]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
@@ -49,12 +53,41 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install jq --no-progress -y
       - name: Tests
-        run: sh tests/run.sh
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          if [ "$SUITE" = core ]; then
+            set --
+            for f in tests/unit/*.sh tests/contract/*.sh; do
+              case $(basename "$f" .sh) in
+                github | gitlab | jira | linear) ;;
+                *) set -- "$@" "$f" ;;
+              esac
+            done
+          else
+            set -- "tests/unit/$SUITE.sh"
+            [ -f "$1" ] || { echo "no $1 on this branch"; exit 0; }
+          fi
+          sh tests/run.sh "$@"
+
+  # The names the ruleset requires: green only when every suite passed.
+  test:
+    needs: unit
+    if: always()
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every suite passed
+        env:
+          RESULT: ${{ needs.unit.result }}
+        run: test "$RESULT" = success
 
   test-alpine:
     runs-on: ubuntu-latest
     container: alpine:3.22
-    timeout-minutes: 60
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tools
