@@ -17,6 +17,9 @@ github_env() {
         if [ "$BOARD_HOST" != github.com ]; then
             GH_HOST=$BOARD_HOST
             export GH_HOST
+        else
+            # gh obeys GH_HOST: one left in the environment would send the calls elsewhere.
+            unset GH_HOST
         fi
         eval "$(printf '%s' "$BOARD_CONFIG_JSON" | _jq -r '
             def s($d): . // $d | tostring;
