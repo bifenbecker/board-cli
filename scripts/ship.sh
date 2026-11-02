@@ -39,8 +39,9 @@ REQUEST_SCHEMA_VERSION=1
 REVIEW_SCHEMA_VERSION=2
 
 forge() {
+    # "command": with tools.forge = "forge" the name would find this function again, not the tool.
     # shellcheck disable=SC2086 # tools.forge may be a command with arguments, e.g. "sh bin/forge"
-    $FORGE_CMD "$@"
+    command $FORGE_CMD "$@"
 }
 
 # The headless agents may read anything but run only read-only git and write only their output.
