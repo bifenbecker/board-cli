@@ -54,8 +54,9 @@ done
 [ "$MODE" = prepare ] || [ -z "$VERSION" ] || { echo "VERSION= only applies to prepare" >&2; exit 2; }
 
 forge() {
+    # "command": with tools.forge = "forge" the name would find this function again, not the tool.
     # shellcheck disable=SC2086 # tools.forge may be a command with arguments, e.g. "sh bin/forge"
-    $FORGE_CMD "$@"
+    command $FORGE_CMD "$@"
 }
 
 step() {
