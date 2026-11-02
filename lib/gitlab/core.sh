@@ -173,12 +173,10 @@ gitlab_viewer() {
 }
 
 # A step failed. Once GL_WROTE is set the board has changed, so that is exit 6 with the id; before
-# that the step's own code stands. A write that timed out printed its id where the step's output
-# was thrown away, so it is printed again here.
+# that the step's own code stands. A write that timed out has printed its id through board_print_id.
 # Usage: gitlab_step_failed <status> <id> <message> || return $?
 gitlab_step_failed() {
     [ -z "${GL_WROTE:-}" ] || board_partial "$2" "$3"
-    [ "$1" != "$BOARD_EXIT_PARTIAL" ] || printf '%s\n' "$2"
     return "$1"
 }
 
