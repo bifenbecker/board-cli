@@ -27,10 +27,8 @@ linear_cycles() {
 
 linear_sprint_list() {
     linear_sl_doc=$(linear_cycles) || return $?
-    printf '%s' "$linear_sl_doc" | _jq -c --arg s "$1" --arg l "$2" '
-        '"$BOARD_LIB"'
-        map(ln_sprint | select($s == "all" or .state == $s))
-        | if $l == "all" then . else .[:($l | tonumber)] end'
+    printf '%s' "$linear_sl_doc" | _jq -c --arg s "$1" '
+        '"$BOARD_LIB"' map(ln_sprint | select($s == "all" or .state == $s))' | board_cut "$2"
 }
 
 linear_sprint_view() {

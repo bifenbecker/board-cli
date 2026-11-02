@@ -1,5 +1,6 @@
 mutation CommentUpdate {
   commentUpdate(id: $id, input: $input) {
+    success
     comment {
       id
       body

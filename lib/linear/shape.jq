@@ -63,19 +63,26 @@ def ln_state_ids($meta; $cfg; $category):
               else .category == $category end)
      | .id];
 
-# Input: the intent of 'board issue list'. $state, $member and $cycle are ids resolved from names,
-# or "".
-def ln_filter($meta; $cfg; $state; $member; $cycle):
+# A person in a filter. The id comparator refuses anything but a UUID, and a name needs no lookup:
+# someone who left the team can still hold issues.
+def ln_person($who):
+    if ($who | test("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+    then {id: {eq: $who}}
+    else {or: [{name: {eqIgnoreCase: $who}}, {displayName: {eqIgnoreCase: $who}}]} end;
+
+# Input: the intent of 'board issue list'. $states holds the ids --status names, and $cycle the id
+# of --sprint, or "".
+def ln_filter($meta; $cfg; $states; $cycle):
     . as $f
     | {and: ([{team: {id: {eq: $meta.team.id}}}]
              + (if $meta.project then [{project: {id: {eq: $meta.project.id}}}] else [] end)
-             + (if $state != "" then [{state: {id: {eq: $state}}}]
+             + (if $f.status then [{state: {id: {in: $states}}}]
                 elif $f.category == "all" then []
                 else [{state: {id: {in: ln_state_ids($meta; $cfg; $f.category)}}}] end)
              + (if $f.assignee == null then []
                 elif $f.assignee == "none" then [{assignee: {null: true}}]
                 elif $f.assignee == "@me" then [{assignee: {isMe: {eq: true}}}]
-                else [{assignee: {id: {eq: $member}}}] end)
+                else [{assignee: ln_person($f.assignee)}] end)
              + [$f.labels[] | {labels: {some: {name: {eqIgnoreCase: .}}}}]
              + (if $f.priority then [{priority: {eq: ($f.priority | ln_priority_value)}}] else [] end)
              + (if $f.sprint == null then []
@@ -102,14 +109,35 @@ def ln_clears:
         . + {priority: {priority: 0}, parent: {parentId: null}, sprint: {cycleId: null},
              milestone: {projectMilestoneId: null}, due: {dueDate: null}}[$c]);
 
-# The relation behind one 'board issue link remove', if there is one. Input: the raw issue.
+# The relation behind one link, if there is one. $other is an identifier or a UUID.
+# Input: the raw issue.
 def ln_relation_id($other; $type):
     (if $type == "blocks" then [.relations.nodes[] | select(.type == "blocks")]
      elif $type == "duplicates" then [.relations.nodes[] | select(.type == "duplicate")]
      elif $type == "blocked-by" then [.inverseRelations.nodes[] | select(.type == "blocks")]
      else [(.relations.nodes + .inverseRelations.nodes)[] | select(.type == "related")] end)
-    | map(select((.relatedIssue.identifier // .issue.identifier) | ieq($other)) | .id)
+    | map(select((.relatedIssue // .issue) | .id == $other or (.identifier | ieq($other))) | .id)
     | first // "";
+
+def ln_connections: ["labels", "children", "relations", "inverseRelations"];
+
+# The values of IssueMore for the connections of a raw issue that stopped at a page. Nothing when
+# none did.
+def ln_more:
+    . as $i
+    | if any(ln_connections[]; $i[.].pageInfo.hasNextPage == true) then
+          reduce ln_connections[] as $c ({id: $i.id};
+              . + {("\($c)More"): ($i[$c].pageInfo.hasNextPage == true),
+                   ("\($c)After"): $i[$c].pageInfo.endCursor})
+      else empty end;
+
+# Input: [raw issue, the issue of an IssueMore answer].
+def ln_merge:
+    .[0] as $i | .[1] as $page
+    | reduce ln_connections[] as $c ($i;
+          if $page[$c] then
+              .[$c].nodes += $page[$c].nodes | .[$c].pageInfo = $page[$c].pageInfo
+          else . end);
 
 def ln_comment:
     {id, author: ((.user // .externalUser) | ln_user), body, url,
@@ -141,5 +169,7 @@ def ln_failure:
           $doc.errors[0]
           | {code: (.extensions.code // ""),
              raw: (.message // ""),
+             path: (.path[0]? // ""),
+             user: (.extensions.userError == true),
              message: (.extensions.userPresentableMessage // .message // "the board refused the request")}
       else empty end;

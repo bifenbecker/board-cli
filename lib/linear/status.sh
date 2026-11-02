@@ -28,6 +28,11 @@ linear_status_add() {
 
 linear_status_rename() {
     linear_sr_id=$(linear_state "$1") || return $?
+    # Linear would take it when the types differ, and then neither name could be moved to. Only
+    # the status itself may hold the new name: that is a change of case.
+    linear_sr_taken=$(linear_state_ids "$2") || return $?
+    linear_sr_taken=$(printf '%s' "$linear_sr_taken" | _jq -c --arg id "$linear_sr_id" 'map(select(. != $id))')
+    [ "$linear_sr_taken" = '[]' ] || board_usage_die "a status named '$2' exists already"
     linear_sr_doc=$(_jq -nc --arg id "$linear_sr_id" --arg n "$2" '{id: $id, input: {name: $n}}' |
         linear_query StateUpdate) || return $?
     rm -f "$BOARD_TMP/linear.meta"

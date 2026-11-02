@@ -76,7 +76,7 @@ OUTPUT
 
 PLATFORM NOTES
   Jira: not supported. A label exists once an issue carries it.
-  Linear: --color needs a # on the board's side; board adds it.
+  Linear: --color needs a # on the board's side; board adds it. A name takes 80 characters at most.
 
 EXAMPLES
   board label create bug --color d73a4a --description "Something is broken"

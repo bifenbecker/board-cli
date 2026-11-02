@@ -77,7 +77,7 @@ linear_mutations() {
 
 test_missing_entity_on_stdout_is_not_found() {
     linear_board
-    linear_fails IssueView out '{"errors":[{"message":"Entity not found: Issue","extensions":{"code":"INPUT_ERROR","userPresentableMessage":"Could not find referenced Issue."}}],"data":null}'
+    linear_fails IssueView out '{"errors":[{"message":"Entity not found: Issue","extensions":{"code":"INPUT_ERROR","userError":true,"userPresentableMessage":"Could not find referenced Issue."}}],"data":null}'
     t_run board issue view 3KD-99999
     t_status 4
     t_contains "$T_ERR" 'Could not find referenced Issue'
@@ -85,8 +85,8 @@ test_missing_entity_on_stdout_is_not_found() {
 
 test_the_other_wording_of_not_found_is_not_found() {
     linear_board
-    linear_fails IssueCreate out '{"errors":[{"message":"issue not found","extensions":{"code":"INPUT_ERROR"}}],"data":null}'
-    t_run board issue create --title t --parent 3KD-2
+    linear_fails IssueCreate out '{"errors":[{"message":"issue not found","extensions":{"code":"INPUT_ERROR","userError":true}}],"data":null}'
+    t_run board issue create --title t
     t_status 4
 }
 
@@ -111,14 +111,16 @@ test_bad_login_is_exit_5_on_either_stream() {
 
 test_no_login_at_all_is_exit_5() {
     linear_board
-    linear_fails Viewer err 'API request failed: No API key configured. Set LINEAR_API_KEY, add api_key to .linear.toml, or run `linear auth login`.'
+    linear_fails Viewer err 'API request failed: No API key configured
+  Set LINEAR_API_KEY, add api_key to .linear.toml, or run `linear auth login`.'
     t_run board auth status
     t_status 5
+    t_contains "$T_ERR" 'No API key configured'
 }
 
 test_a_refused_input_is_a_failure() {
     linear_board
-    linear_fails StateArchive out '{"errors":[{"message":"Active issues","extensions":{"code":"INPUT_ERROR","userPresentableMessage":"The state contains active issues."}}],"data":null}'
+    linear_fails StateArchive out '{"errors":[{"message":"Active issues","extensions":{"code":"INPUT_ERROR","userError":true,"userPresentableMessage":"The state contains active issues."}}],"data":null}'
     t_run board status delete Backlog --yes
     t_status 1
     t_contains "$T_ERR" 'active issues'
@@ -144,20 +146,119 @@ test_timeout_of_a_read_is_a_failure() {
     t_contains "$T_ERR" 'timed out'
 }
 
-test_timeout_of_a_write_is_partial() {
+test_timeout_of_a_write_is_partial_with_the_id() {
     linear_board
+    linear_issue_answer "$linear_backlog" ''
     printf 124 >"$FAKE_OVERRIDE/IssueUpdate.status"
+    : >"$FAKE_OVERRIDE/IssueUpdate.json"
+    t_run board issue move 3KD-1 Done
+    t_status 6
+    t_eq "$T_OUT" 3KD-1 stdout
+}
+
+test_timeout_of_a_create_is_partial_with_no_id() {
+    linear_board
+    printf 124 >"$FAKE_OVERRIDE/IssueCreate.status"
+    : >"$FAKE_OVERRIDE/IssueCreate.json"
+    t_run board issue create --title t
+    t_status 6
+    t_eq "$T_OUT" '' stdout
+    t_run board issue create --help
+    t_contains "$T_OUT" 'there is no id yet'
+}
+
+test_timeout_after_a_first_write_prints_the_id_once() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
+    printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
+    printf 124 >"$FAKE_OVERRIDE/LabelCreate.status"
+    : >"$FAKE_OVERRIDE/LabelCreate.json"
+    t_run board issue edit 3KD-1 --title new --add-label fresh
+    t_status 6
+    t_eq "$T_OUT" 3KD-1 stdout
+}
+
+test_a_mutation_that_died_with_no_answer_may_have_gone_through() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    linear_fails IssueUpdate err 'API request failed: fetch failed'
+    t_run board issue move 3KD-1 Done
+    t_status 6
+    t_eq "$T_OUT" 3KD-1 stdout
+    rm "$FAKE_OVERRIDE/IssueUpdate.err"
+    linear_fails IssueUpdate out '{"errors":[{"message":"boom","extensions":{"code":"INTERNAL_ERROR"}}],"data":null}'
+    t_run board issue move 3KD-1 Done
+    t_status 6
+    rm "$FAKE_OVERRIDE/IssueUpdate.status"
     : >"$FAKE_OVERRIDE/IssueUpdate.json"
     t_run board issue move 3KD-1 Done
     t_status 6
 }
 
+test_a_read_that_died_is_a_plain_failure() {
+    linear_board
+    linear_fails IssueView out '{"errors":[{"message":"boom","extensions":{"code":"INTERNAL_ERROR"}}],"data":null}'
+    t_run board issue move 3KD-1 Done
+    t_status 1
+    t_eq "$T_OUT" '' stdout
+}
+
+test_a_tool_that_never_started_wrote_nothing() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    printf 127 >"$FAKE_OVERRIDE/IssueUpdate.status"
+    : >"$FAKE_OVERRIDE/IssueUpdate.json"
+    t_run board issue move 3KD-1 Done
+    t_status 1
+}
+
+test_a_refused_mutation_is_a_plain_failure() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    linear_fails IssueUpdate out '{"errors":[{"message":"nope","extensions":{"code":"INVALID_INPUT","userError":true}}],"data":null}'
+    t_run board issue move 3KD-1 Done
+    t_status 1
+    t_eq "$T_OUT" '' stdout
+}
+
+test_success_false_is_a_failure() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    printf '{"data":{"issueUpdate":{"success":false,"issue":null}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
+    t_run board issue move 3KD-1 Done
+    t_status 1
+    t_contains "$T_ERR" 'success: false'
+    t_eq "$(grep -c '^query IssueView' "$FAKE_LOG.stdin")" 1 reads
+    printf '{"data":{"issueDelete":{"success":false}}}' >"$FAKE_OVERRIDE/IssueDelete.json"
+    t_run board issue delete 3KD-1 --yes
+    t_status 1
+}
+
+test_board_api_with_a_mutation_counts_as_a_write() {
+    linear_board
+    printf 124 >"$FAKE_OVERRIDE/Anything.status"
+    : >"$FAKE_OVERRIDE/Anything.json"
+    printf 'mutation Anything { issueDelete(id: "x") { success } }' >q.graphql
+    t_run board api - <q.graphql
+    t_status 6
+    printf 'query Anything { viewer { id } }' >q.graphql
+    t_run board api - <q.graphql
+    t_status 1
+    t_run board api 'mutation { issueDelete(id: "x") { success } }' </dev/null
+    t_status 6
+    t_run board api 'query { viewer { id } }' </dev/null
+    t_status 1
+}
+
 test_read_timeout_in_a_move_is_a_plain_failure() {
     linear_board
+    linear_issue_answer "$linear_backlog" ''
     printf 124 >"$FAKE_OVERRIDE/BoardMeta.status"
     : >"$FAKE_OVERRIDE/BoardMeta.json"
     t_run board issue move 3KD-1 Done
     t_status 1
+    t_eq "$T_OUT" '' stdout
 }
 
 test_exit_zero_with_nothing_to_read_is_a_failure() {
@@ -181,6 +282,38 @@ test_a_trashed_issue_is_not_found() {
     linear_issue_answer "$linear_backlog" ',"trashed":true'
     t_run board issue view 3KD-1
     t_status 4
+}
+
+test_a_trashed_issue_takes_no_write() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ',"trashed":true'
+    t_run board issue move 3KD-1 Done
+    t_status 4
+    t_run board issue delete 3KD-1 --yes
+    t_status 4
+    t_run board issue comment list 3KD-1
+    t_status 4
+    t_run board issue comment add 3KD-1 --body x
+    t_status 4
+    t_run board issue comment edit 3KD-1 c1 --body x
+    t_status 4
+    t_run board issue comment delete 3KD-1 c1 --yes
+    t_status 4
+    t_run board issue link add 3KD-1 3KD-2 --type blocks
+    t_status 4
+    t_run board issue create --title t --parent 3KD-1
+    t_status 4
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
+test_a_trashed_other_side_takes_no_link() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    mv "$FAKE_OVERRIDE/IssueView.json" "$FAKE_OVERRIDE/IssueView.1.json"
+    linear_issue_answer "$linear_backlog" ',"trashed":true'
+    t_run board issue link add 3KD-1 3KD-2 --type blocks
+    t_status 4
+    t_eq "$(linear_mutations)" 0 mutations
 }
 
 # --- what travels where -------------------------------------------------------------------
@@ -313,10 +446,11 @@ test_list_filters_become_conditions() {
     t_run board issue list --status 'in progress' --label bug --label ui --priority none --assignee @me --search 'a"b' --parent 3KD-1 -m v1
     t_status 0
     linear_t_sent=$(cat "$FAKE_LOG.stdin")
-    t_contains "$linear_t_sent" 'state:{id:{eq:"s-prog"}}'
+    t_contains "$linear_t_sent" 'state:{id:{in:["s-prog"]}}'
     t_contains "$linear_t_sent" '{labels:{some:{name:{eqIgnoreCase:"bug"}}}},{labels:{some:{name:{eqIgnoreCase:"ui"}}}}'
     t_contains "$linear_t_sent" 'priority:{eq:0}'
     t_contains "$linear_t_sent" 'assignee:{isMe:{eq:true}}'
+    t_lacks "$linear_t_sent" 'query MemberList'
     t_contains "$linear_t_sent" 'title:{containsIgnoreCase:"a\"b"}'
     t_contains "$linear_t_sent" 'parent:{id:{eq:"3KD-1"}}'
     t_contains "$linear_t_sent" 'projectMilestone:{name:{eqIgnoreCase:"v1"}}'
@@ -325,11 +459,7 @@ test_list_filters_become_conditions() {
 test_a_name_the_board_lacks_is_an_empty_list() {
     linear_board
     linear_cycles_on
-    linear_member_answer
     t_run board issue list --status nope --json
-    t_status 0
-    t_eq "$T_OUT" '[]'
-    t_run board issue list --assignee nobody --json
     t_status 0
     t_eq "$T_OUT" '[]'
     t_run board issue list --sprint nope --json
@@ -340,13 +470,27 @@ test_a_name_the_board_lacks_is_an_empty_list() {
 
 test_a_failure_while_looking_up_a_name_is_still_a_failure() {
     linear_board
-    linear_fails MemberList out '{"errors":[{"message":"Authentication required, not authenticated","extensions":{"code":"AUTHENTICATION_ERROR"}}]}'
-    t_run board issue list --assignee someone
+    linear_cycles_on
+    linear_fails CycleList out '{"errors":[{"message":"Authentication required, not authenticated","extensions":{"code":"AUTHENTICATION_ERROR"}}]}'
+    t_run board issue list --sprint someone
     t_status 5
+}
+
+test_someone_outside_the_team_is_filtered_on_the_server() {
+    linear_board
+    linear_empty_list
+    t_run board issue list --assignee 'Left The Team' --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'assignee:{or:[{name:{eqIgnoreCase:"Left The Team"}},{displayName:{eqIgnoreCase:"Left The Team"}}]}'
+    t_run board issue list --assignee 07458d66-3183-444e-8e96-feda82db20cb --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'assignee:{id:{eq:"07458d66-3183-444e-8e96-feda82db20cb"}}'
+    t_lacks "$(cat "$FAKE_LOG.stdin")" 'query MemberList'
 }
 
 test_an_unknown_status_in_a_move_lists_the_real_ones() {
     linear_board
+    linear_issue_answer "$linear_backlog" ''
     t_run board issue move 3KD-1 nope
     t_status 2
     t_contains "$T_ERR" 'Backlog, Triage, In Progress, Done, Canceled, Duplicate'
@@ -358,6 +502,8 @@ test_a_cyrillic_status_is_found_in_any_case() {
 {"data":{"team":{"id":"T","key":"3KD","name":"Three","cyclesEnabled":false,"states":{"nodes":[
 {"id":"s-ru","name":"Готово","type":"completed","position":0}]}}}}
 EOF
+    linear_issue_answer "$linear_backlog" ''
+    mv "$FAKE_OVERRIDE/IssueView.json" "$FAKE_OVERRIDE/IssueView.1.json"
     linear_issue_answer '{"id":"s-ru","name":"Готово","type":"completed"}' ''
     printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
     t_run board issue move 3KD-1 'ГОТОВО' --jq .status.name
@@ -374,6 +520,21 @@ test_type_is_not_a_linear_idea() {
     t_status 3
     t_run board issue edit 3KD-1 --type Bug
     t_status 3
+}
+
+test_a_list_says_when_an_issue_has_more_labels_than_it_shows() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ',"labels":{"pageInfo":{"hasNextPage":true},"nodes":[{"name":"a"}]}'
+    jq -c '{data: {issues: {pageInfo: {hasNextPage: false, endCursor: null}, nodes: [.data.issue]}}}' \
+        <"$FAKE_OVERRIDE/IssueView.json" >"$FAKE_OVERRIDE/IssueList.json"
+    t_run board issue list --json
+    t_status 0
+    t_contains "$T_ERR" 'more than 50 labels'
+    linear_issue_answer "$linear_backlog" ''
+    jq -c '{data: {issues: {pageInfo: {hasNextPage: true, endCursor: "c"}, nodes: [.data.issue]}}}' \
+        <"$FAKE_OVERRIDE/IssueView.json" >"$FAKE_OVERRIDE/IssueList.json"
+    t_run board issue list --limit 1 --json
+    t_lacks "$T_ERR" 'labels'
 }
 
 test_list_warns_when_more_exist() {
@@ -456,29 +617,91 @@ test_every_write_that_cannot_be_read_back_is_partial() {
     t_run board issue link remove 3KD-1 3KD-2 --type blocks
     t_status 6
     t_eq "$T_OUT" 3KD-1 stdout
-    t_run board issue move 3KD-1 Done
-    t_status 6
-    t_eq "$T_OUT" 3KD-1 stdout
-    t_run board issue link add 3KD-1 3KD-2 --type blocks
-    t_status 6
-    t_eq "$T_OUT" 3KD-1 stdout
 }
 
-test_a_read_that_fails_when_nothing_was_written_is_not_partial() {
+test_nothing_to_write_needs_no_second_read() {
     linear_board
     linear_issue_answer '{"id":"s-done","name":"Done","type":"completed"}' ''
-    mv "$FAKE_OVERRIDE/IssueView.json" "$FAKE_OVERRIDE/IssueView.1.json"
-    printf '{"errors":[{"message":"boom","extensions":{"code":"INTERNAL_ERROR"}}],"data":null}' >"$FAKE_OVERRIDE/IssueView.json"
     t_run board issue close 3KD-1
+    t_status 0
+    t_eq "$(grep -c '^query IssueView' "$FAKE_LOG.stdin")" 1 reads
+}
+
+test_the_same_label_twice_is_one_label() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    printf '{"data":{"issueCreate":{"issue":{"identifier":"3KD-1","updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueCreate.json"
+    printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
+    printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"l1","name":"Bug","color":"#EB5757","description":null}]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
+    printf '{"data":{"issueLabelCreate":{"issueLabel":{"id":"l2","name":"Новая","color":"#112233","description":null}}}}' >"$FAKE_OVERRIDE/LabelCreate.json"
+    t_run board issue create --title t --label 'Новая' --label 'НОВАЯ' --label BUG --label bug
+    t_status 0
+    t_eq "$(grep -c '^mutation LabelCreate' "$FAKE_LOG.stdin")" 1 'labels made'
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'labelIds:["l1"]'
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'addedLabelIds:["l2"]'
+}
+
+test_a_label_name_over_80_is_refused_before_a_write() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
+    linear_t_long=$(awk 'BEGIN { for (i = 0; i < 81; i++) printf "я" }')
+    t_run board issue create --title t --label "$linear_t_long"
+    t_status 2
+    t_run board issue edit 3KD-1 --title new --add-label "$linear_t_long"
+    t_status 2
+    t_run board label create "$linear_t_long"
+    t_status 2
+    t_run board label edit old --name "$linear_t_long"
+    t_status 2
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
+test_a_label_name_of_80_passes() {
+    linear_board
+    printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
+    printf '{"data":{"issueLabelCreate":{"issueLabel":{"id":"l2","name":"x","color":"#112233","description":null}}}}' >"$FAKE_OVERRIDE/LabelCreate.json"
+    linear_t_fits=$(awk 'BEGIN { for (i = 0; i < 80; i++) printf "я" }')
+    t_run board label create "$linear_t_fits"
+    t_status 0
+}
+
+test_a_label_on_a_second_page_can_be_removed() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ',"labels":{"pageInfo":{"hasNextPage":true,"endCursor":"p1"},"nodes":[{"id":"l1","name":"first"}]}'
+    printf '{"data":{"issue":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"l2","name":"second"}]}}}}' >"$FAKE_OVERRIDE/IssueMore.json"
+    printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
+    t_run board issue edit 3KD-1 --remove-label second
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'removedLabelIds:["l2"]'
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'after: "p1"'
+    t_contains "$(cat "$FAKE_LOG.stdin")" '@include(if: true)'
+}
+
+test_a_relation_and_a_child_on_a_second_page_are_seen() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ',"relations":{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":[]},"children":{"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"nodes":[{"identifier":"3KD-8"}]}'
+    printf '{"data":{"issue":{"children":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"identifier":"3KD-9"}]},"relations":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"r","type":"blocks","relatedIssue":{"id":"u2","identifier":"3KD-2"}}]}}}}' >"$FAKE_OVERRIDE/IssueMore.json"
+    t_run board issue view 3KD-1 --json
+    t_status 0
+    t_jq "$T_OUT" '.subtasks' '["3KD-8","3KD-9"]'
+    t_jq "$T_OUT" '.links' '[{"type":"blocks","id":"3KD-2"}]'
+}
+
+test_a_page_that_repeats_ends_the_read() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ',"labels":{"pageInfo":{"hasNextPage":true,"endCursor":"p1"},"nodes":[]}'
+    printf '{"data":{"issue":{"labels":{"pageInfo":{"hasNextPage":true,"endCursor":"p1"},"nodes":[]}}}}' >"$FAKE_OVERRIDE/IssueMore.json"
+    t_run board issue view 3KD-1
     t_status 1
-    t_eq "$T_OUT" '' stdout
+    t_contains "$T_ERR" 'same page twice'
 }
 
 test_a_label_that_cannot_be_made_after_create_is_partial() {
     linear_board
     printf '{"data":{"issueCreate":{"issue":{"identifier":"3KD-7","updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueCreate.json"
     printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
-    linear_fails LabelCreate out '{"errors":[{"message":"bad label","extensions":{"code":"INPUT_ERROR"}}],"data":null}'
+    linear_fails LabelCreate out '{"errors":[{"message":"bad label","extensions":{"code":"INPUT_ERROR","userError":true}}],"data":null}'
     t_run board issue create --title t --label new
     t_status 6
     t_eq "$T_OUT" 3KD-7 stdout
@@ -488,7 +711,7 @@ test_an_edit_that_changed_nothing_before_a_label_failed_is_not_partial() {
     linear_board
     linear_issue_answer "$linear_backlog" ''
     printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
-    linear_fails LabelCreate out '{"errors":[{"message":"bad label","extensions":{"code":"INPUT_ERROR"}}],"data":null}'
+    linear_fails LabelCreate out '{"errors":[{"message":"bad label","extensions":{"code":"INPUT_ERROR","userError":true}}],"data":null}'
     t_run board issue edit 3KD-1 --add-label new
     t_status 1
 }
@@ -498,7 +721,7 @@ test_a_label_made_before_the_update_failed_is_partial() {
     linear_issue_answer "$linear_backlog" ''
     printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
     printf '{"data":{"issueLabelCreate":{"issueLabel":{"id":"l2","name":"new","color":"#112233","description":null}}}}' >"$FAKE_OVERRIDE/LabelCreate.json"
-    linear_fails IssueUpdate out '{"errors":[{"message":"nope","extensions":{"code":"INPUT_ERROR"}}],"data":null}'
+    linear_fails IssueUpdate out '{"errors":[{"message":"nope","extensions":{"code":"INPUT_ERROR","userError":true}}],"data":null}'
     t_run board issue edit 3KD-1 --add-label new
     t_status 6
     t_eq "$T_OUT" 3KD-1 stdout
@@ -509,7 +732,7 @@ test_an_edit_that_changed_fields_before_a_label_failed_is_partial() {
     linear_issue_answer "$linear_backlog" ''
     printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
     printf '{"data":{"team":{"labels":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}' >"$FAKE_OVERRIDE/LabelList.json"
-    linear_fails LabelCreate out '{"errors":[{"message":"bad label","extensions":{"code":"INPUT_ERROR"}}],"data":null}'
+    linear_fails LabelCreate out '{"errors":[{"message":"bad label","extensions":{"code":"INPUT_ERROR","userError":true}}],"data":null}'
     t_run board issue edit 3KD-1 --title new --add-label new
     t_status 6
     t_eq "$T_OUT" 3KD-1 stdout
@@ -594,6 +817,22 @@ test_reopen_skips_triage() {
     t_contains "$(cat "$FAKE_LOG.stdin")" 'stateId:"s-back"'
 }
 
+test_reopen_into_the_status_it_has_writes_nothing() {
+    linear_board
+    linear_issue_answer '{"id":"s-done","name":"Done","type":"completed"}' ''
+    t_run board issue reopen 3KD-1 --status Done
+    t_status 0
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
+test_moving_to_the_status_it_has_writes_nothing() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    t_run board issue move 3KD-1 backlog
+    t_status 0
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
 test_reopening_an_open_issue_writes_nothing() {
     linear_board
     linear_issue_answer '{"id":"s-prog","name":"In Progress","type":"started"}' ''
@@ -612,7 +851,7 @@ test_a_duplicate_reads_as_canceled() {
 
 # --- links --------------------------------------------------------------------------------
 
-linear_linked='"relations":{"nodes":[{"id":"r1","type":"blocks","relatedIssue":{"identifier":"3KD-2"}},{"id":"r5","type":"similar","relatedIssue":{"identifier":"3KD-5"}}]},"inverseRelations":{"nodes":[{"id":"r2","type":"blocks","issue":{"identifier":"3KD-3"}},{"id":"r3","type":"related","issue":{"identifier":"3KD-4"}},{"id":"r4","type":"duplicate","issue":{"identifier":"3KD-6"}}]}'
+linear_linked='"relations":{"nodes":[{"id":"r1","type":"blocks","relatedIssue":{"id":"u2","identifier":"3KD-2"}},{"id":"r5","type":"similar","relatedIssue":{"id":"u5","identifier":"3KD-5"}}]},"inverseRelations":{"nodes":[{"id":"r2","type":"blocks","issue":{"id":"u3","identifier":"3KD-3"}},{"id":"r3","type":"related","issue":{"id":"u4","identifier":"3KD-4"}},{"id":"r4","type":"duplicate","issue":{"id":"u6","identifier":"3KD-6"}}]}'
 
 test_links_read_from_both_sides() {
     linear_board
@@ -640,28 +879,45 @@ test_a_read_that_lags_behind_an_update_is_repeated() {
     linear_board
     linear_issue_answer "$linear_backlog" ''
     mv "$FAKE_OVERRIDE/IssueView.json" "$FAKE_OVERRIDE/IssueView.1.json"
+    cp "$FAKE_OVERRIDE/IssueView.1.json" "$FAKE_OVERRIDE/IssueView.2.json"
     linear_issue_answer '{"id":"s-done","name":"Done","type":"completed"}' ',"updatedAt":"2026-11-01T14:03:10.000Z"'
     printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:03:10.000Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
     t_run board issue move 3KD-1 Done --jq .status.name
     t_status 0
     t_eq "$T_OUT" Done
-    t_eq "$(grep -c '^query IssueView' "$FAKE_LOG.stdin")" 2 reads
+    t_eq "$(grep -c '^query IssueView' "$FAKE_LOG.stdin")" 3 reads
 }
 
-test_a_read_that_never_catches_up_is_partial_not_a_lie() {
+test_a_failed_read_after_a_write_is_one_more_try() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    mv "$FAKE_OVERRIDE/IssueView.json" "$FAKE_OVERRIDE/IssueView.1.json"
+    printf '{"errors":[{"message":"boom","extensions":{"code":"INTERNAL_ERROR"}}],"data":null}' >"$FAKE_OVERRIDE/IssueView.2.json"
+    linear_issue_answer '{"id":"s-done","name":"Done","type":"completed"}' ''
+    printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
+    t_run board issue move 3KD-1 Done --jq .status.name
+    t_status 0
+    t_eq "$T_OUT" Done
+}
+
+test_a_read_that_never_catches_up_ends_at_the_deadline() {
     linear_board
     linear_issue_answer "$linear_backlog" ''
     printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:03:10.000Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
+    linear_t_start=$(date +%s)
     t_run board issue move 3KD-1 Done
     t_status 6
     t_eq "$T_OUT" 3KD-1 stdout
     t_contains "$T_ERR" 'old state'
+    [ "$(($(date +%s) - linear_t_start))" -lt 45 ] || t_fail "the wait outlived its deadline"
 }
 
 test_a_link_that_is_slow_to_show_is_waited_for() {
     linear_board
     linear_issue_answer "$linear_backlog" ''
     mv "$FAKE_OVERRIDE/IssueView.json" "$FAKE_OVERRIDE/IssueView.1.json"
+    cp "$FAKE_OVERRIDE/IssueView.1.json" "$FAKE_OVERRIDE/IssueView.2.json"
+    cp "$FAKE_OVERRIDE/IssueView.1.json" "$FAKE_OVERRIDE/IssueView.3.json"
     linear_issue_answer "$linear_backlog" ',"relations":{"nodes":[{"id":"r","type":"blocks","relatedIssue":{"identifier":"3KD-2"}}]}'
     printf '{"data":{"issueRelationCreate":{"success":true}}}' >"$FAKE_OVERRIDE/RelationCreate.json"
     t_run board issue link add 3KD-1 3KD-2 --type blocks --jq '.links[0].id'
@@ -681,6 +937,17 @@ test_a_removed_link_is_waited_for_too() {
     t_eq "$T_OUT" 0
 }
 
+test_a_link_is_found_by_the_uuid_of_the_other_side() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ',"relations":{"nodes":[{"id":"r1","type":"blocks","relatedIssue":{"id":"aaaaaaaa-0000-4000-8000-000000000001","identifier":"3KD-2"}}]}'
+    mv "$FAKE_OVERRIDE/IssueView.json" "$FAKE_OVERRIDE/IssueView.1.json"
+    linear_issue_answer "$linear_backlog" ''
+    printf '{"data":{"issueRelationDelete":{"success":true}}}' >"$FAKE_OVERRIDE/RelationDelete.json"
+    t_run board issue link remove 3KD-1 aaaaaaaa-0000-4000-8000-000000000001 --type blocks
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'issueRelationDelete(id: "r1")'
+}
+
 test_removing_a_link_that_is_not_there_writes_nothing() {
     linear_board
     linear_issue_answer "$linear_backlog" ",$linear_linked"
@@ -697,6 +964,77 @@ test_statuses_come_in_board_order() {
     t_status 0
     t_jq "$T_OUT" 'map(.name)' '["Backlog","Triage","In Progress","Done","Canceled","Duplicate"]'
     t_jq "$T_OUT" 'map(.category) | unique' '["canceled","done","in_progress","todo"]'
+}
+
+# Linear lets two statuses share a name when their types differ.
+linear_twins() {
+    cat >"$FAKE_OVERRIDE/BoardMeta.json" <<'EOF'
+{"data":{"team":{"id":"T","key":"3KD","name":"Three","cyclesEnabled":false,"states":{"nodes":[
+{"id":"s-rev-done","name":"Review","type":"completed","position":0},
+{"id":"s-back","name":"Backlog","type":"backlog","position":0},
+{"id":"s-rev-now","name":"review","type":"started","position":0}]}}}}
+EOF
+}
+
+test_a_name_two_statuses_share_takes_no_write() {
+    linear_board
+    linear_twins
+    linear_issue_answer "$linear_backlog" ''
+    t_run board issue move 3KD-1 review
+    t_status 2
+    t_contains "$T_ERR" 's-rev-now'
+    t_contains "$T_ERR" 's-rev-done'
+    t_run board status delete Review --yes
+    t_status 2
+    t_run board status rename Review Other
+    t_status 2
+    t_run board issue edit 3KD-1 --status Review
+    t_status 2
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
+test_a_name_two_statuses_share_is_reached_by_id() {
+    linear_board
+    linear_twins
+    linear_issue_answer "$linear_backlog" ''
+    printf '{"data":{"issueUpdate":{"issue":{"updatedAt":"2026-11-01T14:02:59.396Z"}}}}' >"$FAKE_OVERRIDE/IssueUpdate.json"
+    t_run board issue move 3KD-1 s-rev-done
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'stateId:"s-rev-done"'
+}
+
+test_a_shared_name_filters_on_all_of_them_in_board_order() {
+    linear_board
+    linear_twins
+    linear_empty_list
+    t_run board issue list --status REVIEW --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'state:{id:{in:["s-rev-now","s-rev-done"]}}'
+}
+
+test_a_shared_name_resolves_in_board_order() {
+    linear_board
+    linear_twins
+    t_run board status add Review --category done --json
+    t_status 0
+    t_jq "$T_OUT" '.id' '"s-rev-now"'
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
+test_a_rename_onto_a_taken_name_writes_nothing() {
+    linear_board
+    t_run board status rename Backlog 'in progress'
+    t_status 2
+    t_contains "$T_ERR" 'exists already'
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
+test_a_rename_may_change_only_the_case() {
+    linear_board
+    printf '{"data":{"workflowStateUpdate":{"workflowState":{"id":"s-back","name":"BACKLOG","type":"backlog"}}}}' >"$FAKE_OVERRIDE/StateUpdate.json"
+    t_run board status rename Backlog BACKLOG --json
+    t_status 0
+    t_jq "$T_OUT" '.name' '"BACKLOG"'
 }
 
 test_status_add_maps_the_category_to_a_type() {
@@ -740,6 +1078,7 @@ test_label_create_of_one_that_exists_writes_nothing() {
 
 test_comments_of_integrations_are_left_out_and_the_rest_sorted() {
     linear_board
+    linear_issue_answer "$linear_backlog" ''
     cat >"$FAKE_OVERRIDE/CommentList.json" <<'EOF'
 {"data":{"issue":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
 {"id":"c2","body":"new","url":"u","createdAt":"2026-11-02T00:00:00.000Z","updatedAt":"2026-11-02T00:00:00.000Z","user":{"id":"u1","name":"A","displayName":"a"},"externalUser":null},
@@ -750,6 +1089,88 @@ EOF
     t_status 0
     t_jq "$T_OUT" 'map(.id)' '["c1","c2"]'
     t_jq "$T_OUT" '.[0].author.name' '"Customer"'
+}
+
+test_comments_of_one_second_keep_their_order() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ''
+    cat >"$FAKE_OVERRIDE/CommentList.json" <<'EOF'
+{"data":{"issue":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+{"id":"late","body":"b","url":"u","createdAt":"2026-11-01T10:00:00.900Z","updatedAt":"2026-11-01T10:00:00.900Z","user":{"id":"u1","name":"A","displayName":"a"},"externalUser":null},
+{"id":"early","body":"a","url":"u","createdAt":"2026-11-01T10:00:00.100Z","updatedAt":"2026-11-01T10:00:00.100Z","user":{"id":"u1","name":"A","displayName":"a"},"externalUser":null}]}}}}
+EOF
+    t_run board issue comment list 3KD-1 --json
+    t_status 0
+    t_jq "$T_OUT" 'map(.id)' '["early","late"]'
+}
+
+linear_comment_answers() {
+    linear_issue_answer "$linear_backlog" ''
+    printf '{"data":{"commentUpdate":{"comment":{"id":"c1","body":"new","url":"u","createdAt":"2026-11-01T10:00:00.100Z","updatedAt":"2026-11-01T10:00:00.100Z","user":{"id":"u1","name":"A","displayName":"a"},"externalUser":null}}}}' >"$FAKE_OVERRIDE/CommentUpdate.json"
+    printf '{"data":{"commentDelete":{"success":true}}}' >"$FAKE_OVERRIDE/CommentDelete.json"
+}
+
+test_a_comment_on_another_issue_is_not_found() {
+    linear_board
+    linear_comment_answers
+    printf '{"data":{"comment":{"issue":{"id":"other"}}}}' >"$FAKE_OVERRIDE/CommentIssue.json"
+    t_run board issue comment edit 3KD-1 c1 --body new
+    t_status 4
+    t_run board issue comment delete 3KD-1 c1 --yes
+    t_status 4
+    t_eq "$(linear_mutations)" 0 mutations
+}
+
+test_a_comment_on_nothing_is_not_found() {
+    linear_board
+    linear_comment_answers
+    printf '{"data":{"comment":{"issue":null}}}' >"$FAKE_OVERRIDE/CommentIssue.json"
+    t_run board issue comment delete 3KD-1 c1 --yes
+    t_status 4
+}
+
+test_a_comment_on_this_issue_is_written() {
+    linear_board
+    linear_comment_answers
+    printf '{"data":{"comment":{"issue":{"id":"u1"}}}}' >"$FAKE_OVERRIDE/CommentIssue.json"
+    t_run board issue comment edit 3KD-1 c1 --body new --json
+    t_status 0
+    t_jq "$T_OUT" '.body' '"new"'
+    t_run board issue comment delete 3KD-1 c1 --yes
+    t_status 0
+}
+
+test_the_help_says_an_issue_outside_the_project_is_reachable() {
+    t_run board issue list --help
+    t_contains "$T_OUT" 'stays reachable by id'
+    t_run board issue view --help
+    t_contains "$T_OUT" 'also outside [board.target] project'
+}
+
+test_a_project_name_says_which_setting_is_wrong() {
+    t_workflow <<'EOF'
+[board]
+kind    = "linear"
+url     = "https://linear.app/acme"
+project = "3KD"
+
+[board.target]
+project = "Test"
+EOF
+    linear_answers
+    linear_fails BoardMeta out '{"errors":[{"message":"Entity not found: Project","path":["project"],"extensions":{"code":"INPUT_ERROR","userError":true,"userPresentableMessage":"Could not find referenced Project."}}],"data":null}'
+    t_run board status list
+    t_status 4
+    t_contains "$T_ERR" "project 'Test' was not found"
+    t_contains "$T_ERR" '[board.target] project wants the slug'
+}
+
+test_a_wrong_team_says_which_setting_is_wrong() {
+    linear_board
+    linear_fails BoardMeta out '{"errors":[{"message":"Entity not found: Team","path":["team"],"extensions":{"code":"INPUT_ERROR","userError":true,"userPresentableMessage":"Could not find referenced Team."}}],"data":null}'
+    t_run board status list
+    t_status 4
+    t_contains "$T_ERR" '[board] project wants the team key'
 }
 
 test_milestones_need_a_project() {
@@ -826,6 +1247,17 @@ test_cycles_become_sprints_newest_first() {
     t_eq "$T_OUT" closed
     t_run board sprint view 9
     t_status 4
+}
+
+test_sprint_list_says_when_the_limit_cuts_it() {
+    linear_board
+    linear_cycles_on
+    t_run board sprint list --limit 1 --json
+    t_status 0
+    t_jq "$T_OUT" 'length' 1
+    t_contains "$T_ERR" 'more exist'
+    t_run board sprint list --limit 3 --json
+    t_lacks "$T_ERR" 'more exist'
 }
 
 test_a_sprint_is_found_by_name_number_or_current() {

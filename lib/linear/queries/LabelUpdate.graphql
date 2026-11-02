@@ -1,3 +1,3 @@
 mutation LabelUpdate {
-  issueLabelUpdate(id: $id, input: $input) { issueLabel { id name color description } }
+  issueLabelUpdate(id: $id, input: $input) { success issueLabel { id name color description } }
 }

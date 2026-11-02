@@ -3,7 +3,7 @@ query IssueList {
     pageInfo { hasNextPage endCursor }
     nodes {
       ...IssueRow
-      labels(first: 50) { nodes { name } }
+      labels(first: 50) { pageInfo { hasNextPage } nodes { name } }
     }
   }
 }

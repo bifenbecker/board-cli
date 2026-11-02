@@ -122,6 +122,7 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub, GitLab: also rename the key in [board.statuses].
+  Linear: a name another status has is exit 2, though Linear would take it for another type.
   Jira: not supported: statuses belong to workflows, which need an administrator.
 
 EXAMPLES
@@ -159,7 +160,8 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub: issues still in the status lose it.
-  Linear: the status is archived, and that is refused while issues are in it: exit 1.
+  Linear: the status is archived, and that is refused while issues are in it: exit 1. Two statuses
+          may share a name: exit 2 lists them, and <name> then takes the id.
   Jira: not supported: statuses belong to workflows, which need an administrator.
 
 EXAMPLES

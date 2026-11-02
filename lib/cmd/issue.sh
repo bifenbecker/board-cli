@@ -124,7 +124,8 @@ PLATFORM NOTES
   GitHub: lists the items of the project in project order, draft items included, pull requests
           left out. --search reads every page it has to, so it is slower on a big project.
   GitLab: --category needs [board.statuses]: an open issue with no status label has no category.
-  Linear: --type is not supported; there are no issue types.
+  Linear: --type is not supported; there are no issue types. With [board.target] project only that
+          project is listed, but an issue outside it stays reachable by id.
 
 EXAMPLES
   board issue list
@@ -198,6 +199,10 @@ OUTPUT
   JSON: $ISSUE_SHAPE
   With --comments, also comments[{id, author{id, name}, body, url, created_at, updated_at}].
 
+PLATFORM NOTES
+  Linear: any issue of the workspace is reachable by id, also outside [board.target] project.
+  GitHub: any issue is reachable as owner/repo#number, also outside the project.
+
 EXAMPLES
   board issue view KAN-1
   board issue view 3KD-13 --comments
@@ -267,7 +272,9 @@ FLAGS
 OUTPUT
   Text: the URL of the issue.
   JSON: $ISSUE_SHAPE
-  Exit 6 means the issue exists but a later step failed: the id is on stdout.
+  Exit 6 means the issue exists but a later step failed: the id is on stdout. When the create
+  itself timed out it may or may not exist and there is no id yet: exit 6 with nothing on stdout.
+  Look for it with 'board issue list' before repeating the command.
 
 PLATFORM NOTES
   GitHub: the issue is created in the repository of [board] url and added to the project. Issue
@@ -423,6 +430,8 @@ PLATFORM NOTES
           issue, and closing sets Done. Read the issue again before relying on a final state.
   GitLab: on Free a status is a label. board removes the other status labels, and a status mapped
           to done also closes the issue.
+  Linear: two statuses may share a name: exit 2 lists them, and <status> then takes the id from
+          'board status list --json'.
 
 EXAMPLES
   board issue move KAN-1 "In Progress"

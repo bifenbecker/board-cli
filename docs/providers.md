@@ -80,7 +80,15 @@ exit codes, so nothing depends on them: only `linear api` is used, and its JSON 
   **stderr**. Read both. `extensions.code` is `AUTHENTICATION_ERROR` or `INPUT_ERROR`;
   `message` is `Entity not found: Issue` when missing, but `issue not found` for a bad `parentId`.
   `extensions.userPresentableMessage` is the better text for a person.
-- With no login at all there is no JSON: one line on stderr that ends in `linear auth login`.
+- With no login at all there is no JSON: two lines on stderr, and `linear auth login` is only in the
+  second. A login missing for `--workspace` is one line that names it.
+- Every measured refusal has `extensions.userError: true`. Without it, a failed mutation may have
+  gone through.
+- The id comparator of a filter refuses anything but a UUID with `Argument Validation Error`.
+  `assignee: {or: [{name: ...}, {displayName: ...}]}` finds people outside the team as well.
+- A root field names itself in `errors[].path`: `project` or `team` tells which setting is wrong.
+- `comment(id:)` answers `Entity not found: Comment` for a word as for a UUID, and its `issue` is
+  null when the comment hangs on something else.
 - `issue(id:)` accepts the identifier (`3KD-13`) as well as the UUID. So do `issueUpdate(id:)`,
   `issueDelete(id:)`, `parentId`, `commentCreate`'s `issueId`, both ids of `issueRelationCreate`, and
   the filter `parent: {id: {eq: "3KD-13"}}`.
@@ -101,6 +109,9 @@ exit codes, so nothing depends on them: only `linear api` is used, and its JSON 
   the issue to the `Duplicate` state, and deleting the relation moves it back.
 - `team.labels` holds the team's labels and the workspace's. `issueLabelCreate` of a name that
   exists in either fails with `INPUT_ERROR`. A label needs no color: Linear picks one.
+- A label name takes 80 characters. Longer is `Argument Validation Error`.
+- Two states may share a name when their types differ: `Cannot create a duplicate workflow state`
+  only comes for the same name and type.
 - `workflowStateCreate` works and needs a color. `workflowStateArchive` fails with `INPUT_ERROR`
   while issues are in the state; there is no delete. An archived state stays, visible only with
   `includeArchived`, and its name can be used again.

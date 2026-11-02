@@ -1,5 +1,6 @@
 mutation MilestoneCreate {
   projectMilestoneCreate(input: $input) {
+    success
     projectMilestone { id name description status targetDate }
   }
 }

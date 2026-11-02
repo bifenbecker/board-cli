@@ -4,10 +4,12 @@
 # [board] project; [board.target] project narrows it to one project of that team.
 
 LN_READY=''
-# How many times a read after a write is repeated, two seconds apart. The lag measured was under 20s.
-LN_SETTLE_TRIES=8
+# How long a write waits for a read that has caught up. The lag measured was under 20s.
+LN_SETTLE_SECONDS=20
 
 linear_env() {
+    # Exit 6 promises the id on stdout, and the transport runs inside $(...) and >/dev/null.
+    exec 4>&1
     [ -z "${LN_READY:-}" ] || return 0
     LN_CLI=linear
     LN_TEAM=${BOARD_PROJECT:-}
@@ -38,11 +40,20 @@ linear_require_team() {
     [ -n "$LN_TEAM" ] || board_usage_die "[board] project needs the team key, e.g. ENG"
 }
 
+# A call failed with no word on whether the board acted. A read just failed; a mutation may have gone
+# through, so repeating it blindly could do it twice.
+linear_unknown_write() {
+    [ -n "${BOARD_WRITE:-}" ] || return "$BOARD_EXIT_ERROR"
+    [ -z "${BOARD_WRITE_ID:-}" ] || printf '%s\n' "$BOARD_WRITE_ID" >&4
+    board_warn "the write may have gone through. Check before repeating it"
+    return "$BOARD_EXIT_PARTIAL"
+}
+
 # What a failed call means. A GraphQL error lands on stdout or on stderr depending on where it was
-# raised, so both are read; anything else is one line of text from the tool on stderr.
+# raised, so both are read; anything else is text from the tool on stderr.
 linear_check() {
     if [ "$1" = "$BOARD_EXIT_TIMEOUT" ]; then
-        board_timed_out
+        board_timed_out >&4
         return $?
     fi
     linear_ck_doc=$(_jq -Rsc ''"$BOARD_LIB"' ln_failure' <"$BOARD_OUT") || linear_ck_doc=''
@@ -53,13 +64,28 @@ linear_check() {
         [ "$1" != 0 ] || return 0
         linear_ck_line=$(board_err_line)
         board_warn "${linear_ck_line:-linear exited with status $1}"
-        case $linear_ck_line in
-            *'linear auth login'*) return "$BOARD_EXIT_AUTH" ;;
+        # The hint is not on the first line of what the tool prints.
+        if grep -q 'linear auth login' "$BOARD_ERR"; then
+            return "$BOARD_EXIT_AUTH"
+        fi
+        # 126 and 127: the tool never started, so nothing was sent.
+        case $1 in
+            126 | 127) return "$BOARD_EXIT_ERROR" ;;
         esac
-        return "$BOARD_EXIT_ERROR"
+        linear_unknown_write
+        return $?
     fi
-    eval "$(printf '%s' "$linear_ck_doc" | _jq -r \
-        '@sh "linear_ck_code=\(.code | tostring) linear_ck_raw=\(.raw | tostring) linear_ck_line=\(.message | tostring)"')"
+    eval "$(printf '%s' "$linear_ck_doc" | _jq -r '
+        @sh "linear_ck_code=\(.code | tostring) linear_ck_raw=\(.raw | tostring) linear_ck_line=\(.message | tostring)",
+        @sh "linear_ck_path=\(.path | tostring) linear_ck_user=\(.user | tostring)"')"
+    case $linear_ck_raw:$linear_ck_path in
+        'Entity not found: Project:project')
+            linear_ck_line="project '$LN_PROJECT' was not found: [board.target] project wants the slug, the last part of the project URL"
+            ;;
+        'Entity not found: Team:team')
+            linear_ck_line="team '$LN_TEAM' was not found: [board] project wants the team key"
+            ;;
+    esac
     board_warn "$linear_ck_line"
     case $linear_ck_code in
         AUTHENTICATION_ERROR | FORBIDDEN) return "$BOARD_EXIT_AUTH" ;;
@@ -68,6 +94,11 @@ linear_check() {
     case $linear_ck_raw in
         'Entity not found'* | *' not found') return "$BOARD_EXIT_NOT_FOUND" ;;
     esac
+    # userError says Linear turned the request down. Anything else failed on its way through.
+    [ "$linear_ck_user" = true ] || {
+        linear_unknown_write
+        return $?
+    }
     return "$BOARD_EXIT_ERROR"
 }
 
@@ -79,7 +110,7 @@ linear_run() {
         set -- --workspace "$LN_WORKSPACE" "$@"
     fi
     linear_rn_status=0
-    board_exec "$LN_CLI" api "$@" || linear_rn_status=$?
+    board_exec "$LN_CLI" api "$@" 4>&- || linear_rn_status=$?
     linear_check "$linear_rn_status"
 }
 
@@ -87,11 +118,21 @@ linear_run() {
 linear_gql() {
     linear_run - || return $?
     board_record "$1"
-    # Exit 0 with nothing to read must not pass for a write that went through.
-    _jq -ce .data <"$BOARD_OUT" || {
-        board_warn "linear gave no answer"
-        return "$BOARD_EXIT_ERROR"
-    }
+    linear_gq_doc=$(_jq -c '.data // empty
+        | if ([.[]? | objects | .success] | index(false)) then "refused" else . end' <"$BOARD_OUT") || linear_gq_doc=''
+    case $linear_gq_doc in
+        '')
+            # Exit 0 with nothing to read must not pass for a write that went through.
+            board_warn "linear gave no answer"
+            linear_unknown_write
+            return $?
+            ;;
+        '"refused"')
+            board_warn "linear turned the change down: it answered success: false"
+            return "$BOARD_EXIT_ERROR"
+            ;;
+    esac
+    printf '%s\n' "$linear_gq_doc"
 }
 
 # Usage: <values JSON on stdin> | linear_query <Name>
@@ -122,26 +163,38 @@ linear_meta() {
     linear_require_team
     linear_mt_doc=$(_jq -nc --arg team "$LN_TEAM" --arg project "$LN_PROJECT" \
         '{team: $team, project: $project, narrowed: ($project != "")}' | linear_query BoardMeta) || return $?
+    case $linear_mt_doc in
+        *'"hasNextPage":true'*) board_warn "team $LN_TEAM has more than 250 statuses: only the first 250 are known" ;;
+    esac
     printf '%s' "$linear_mt_doc" >"$BOARD_TMP/linear.meta"
     printf '%s' "$linear_mt_doc"
 }
 
-# Usage: linear_state_find <name>  — prints the id of a status, or nothing.
-linear_state_find() {
+# Usage: linear_state_ids <name|id>  — prints the ids it names as a JSON array, in board order.
+# Linear lets two statuses share a name when their types differ.
+linear_state_ids() {
     linear_sf_meta=$(linear_meta) || return $?
-    printf '%s' "$linear_sf_meta" | _jq -r --arg n "$1" '
-        '"$BOARD_LIB"' [.team.states.nodes[] | select(.name | ieq($n)) | .id] | first // ""'
+    printf '%s' "$linear_sf_meta" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg n "$1" '
+        '"$BOARD_LIB"' [.team.states.nodes | ln_statuses($cfg)[] | select(.id == $n or (.name | ieq($n))) | .id]'
 }
 
-# Usage: linear_state <name>  — prints the id of a status. An unknown name is wrong usage.
+# Usage: linear_state <name|id>  — prints the id of one status. A name that is not there, or that
+# fits two, is wrong usage: a write must not pick one.
 linear_state() {
-    linear_st_id=$(linear_state_find "$1") || return $?
-    if [ -z "$linear_st_id" ]; then
-        linear_st_meta=$(linear_meta) || return $?
-        board_usage_die "no status '$1': the team has $(printf '%s' "$linear_st_meta" | _jq -r --argjson cfg "$BOARD_CONFIG_JSON" '
-            '"$BOARD_LIB"' .team.states.nodes | ln_statuses($cfg) | map(.name) | join(", ")')"
-    fi
-    printf '%s' "$linear_st_id"
+    linear_st_ids=$(linear_state_ids "$1") || return $?
+    linear_st_meta=$(linear_meta) || return $?
+    case $linear_st_ids in
+        '[]')
+            board_usage_die "no status '$1': the team has $(printf '%s' "$linear_st_meta" | _jq -r --argjson cfg "$BOARD_CONFIG_JSON" '
+                '"$BOARD_LIB"' .team.states.nodes | ln_statuses($cfg) | map(.name) | join(", ")')"
+            ;;
+        *,*)
+            board_usage_die "status '$1' fits more than one, so pass the id: $(printf '%s' "$linear_st_meta" | _jq -r --argjson cfg "$BOARD_CONFIG_JSON" --argjson ids "$linear_st_ids" '
+                '"$BOARD_LIB"' .team.states.nodes | ln_statuses($cfg)
+                | map(select(.id | IN($ids[])) | "\(.name) (\(.category // "no category"), id \(.id))") | join(", ")')"
+            ;;
+    esac
+    printf '%s' "$linear_st_ids" | _jq -r '.[0]'
 }
 
 # Usage: linear_status_in <category>  — prints the id of its first status in board order, or nothing.
@@ -189,8 +242,26 @@ linear_board_view() {
            columns: ($s | map({name, statuses: [.name]})), statuses: $s}'
 }
 
+# A query can hide a mutation in argv or on stdin, and only the text tells. Reading too much into a
+# word costs a warning; reading too little would call a write that timed out a plain failure.
 linear_api_call() {
-    linear_run "$@" || return $?
+    BOARD_WRITE=''
+    linear_ac_stdin=''
+    for linear_ac_arg in "$@"; do
+        case $linear_ac_arg in
+            -) linear_ac_stdin=1 ;;
+            *mutation*) BOARD_WRITE=1 ;;
+        esac
+    done
+    if [ -n "$linear_ac_stdin" ]; then
+        cat >"$BOARD_TMP/api.in"
+        if grep -q mutation "$BOARD_TMP/api.in"; then
+            BOARD_WRITE=1
+        fi
+        linear_run "$@" <"$BOARD_TMP/api.in" || return $?
+    else
+        linear_run "$@" || return $?
+    fi
     cat "$BOARD_OUT"
 }
 

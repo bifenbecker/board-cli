@@ -4,7 +4,7 @@ query BoardMeta {
     key
     name
     cyclesEnabled
-    states(first: 100) { nodes { id name type position } }
+    states(first: 250) { pageInfo { hasNextPage } nodes { id name type position } }
   }
   project(id: $project) @include(if: $narrowed) { id name url }
 }

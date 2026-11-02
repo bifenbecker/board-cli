@@ -1,3 +1,3 @@
 mutation IssueCreate {
-  issueCreate(input: $input) { issue { identifier updatedAt } }
+  issueCreate(input: $input) { success issue { identifier updatedAt } }
 }
