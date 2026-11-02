@@ -57,6 +57,7 @@ issue_fields_reset() {
     opt_title='' opt_title_set='' opt_status='' opt_priority='' opt_type='' opt_parent=''
     opt_sprint='' opt_milestone='' opt_due='' opt_assignees='' opt_labels=''
     opt_add_labels='' opt_remove_labels='' opt_add_assignees='' opt_remove_assignees='' opt_clear=''
+    opt_type_default=''
 }
 
 # Prints the intent an adapter reads: every key present, null when the flag was not given. The
@@ -69,12 +70,13 @@ issue_intent() {
         --arg due "$opt_due" --arg assignees "$opt_assignees" --arg labels "$opt_labels" \
         --arg add_labels "$opt_add_labels" --arg remove_labels "$opt_remove_labels" \
         --arg add_assignees "$opt_add_assignees" --arg remove_assignees "$opt_remove_assignees" \
-        --arg clear "$opt_clear" '
+        --arg clear "$opt_clear" --arg type_default "$opt_type_default" '
         include "jq/common";
         def list: if . == "" then [] else split("\n") end;
         {title: (if $title_set == "" then null else $title end),
          body: (if $body_set == "" then null else . end),
          status: ($status | nullify), priority: ($priority | nullify), type: ($type | nullify),
+         type_default: ($type_default != ""),
          parent: ($parent | nullify), sprint: ($sprint | nullify), milestone: ($milestone | nullify),
          due: ($due | nullify), assignees: ($assignees | list), labels: ($labels | list),
          add_labels: ($add_labels | list), remove_labels: ($remove_labels | list),
@@ -123,7 +125,12 @@ OUTPUT
 PLATFORM NOTES
   GitHub: lists the items of the project in project order, draft items included, pull requests
           left out. --search reads every page it has to, so it is slower on a big project.
-  GitLab: --category needs [board.statuses]: an open issue with no status label has no category.
+  GitLab: an issue with no status label reads as todo while open and as done once closed, with a
+          null status name. A closed issue is done or canceled whatever label it kept: an open
+          status label stays as the name and the category reads done. Filters decide on board's
+          side, so done, canceled, and a name GitLab reads as a keyword (Any, None) or cannot
+          match read issues until --limit is met. --priority needs [board.priority]: exit 3
+          otherwise. parent is null unless --parent is given.
   Linear: --type is not supported; there are no issue types.
 
 EXAMPLES
@@ -274,7 +281,11 @@ PLATFORM NOTES
           types exist only in organisations: exit 3 for --type elsewhere.
   Jira: description is converted from markdown to wiki markup, best effort. One assignee only.
   Linear: one assignee only. --type is not supported.
-  GitLab: on Free one assignee only.
+  GitLab: on Free one assignee only. Without --status the issue starts in the first todo status of
+          [board.statuses]. --parent makes a Task unless --type names another; a type that cannot
+          sit under that parent is exit 3, with nothing written. --priority needs [board.priority]:
+          exit 3 otherwise. A --label naming a declared status or priority is that change. A line
+          of the body starting with / stays text: GitLab does not run it as a quick action.
 
 EXAMPLES
   board issue create --title "Login fails" --label bug --priority high
@@ -298,7 +309,11 @@ cmd_issue_create() {
         esac
     done
     [ -n "$opt_title" ] || board_usage_die "--title is required"
-    [ -n "$opt_type" ] || opt_type=$(board_config_get .defaults.type)
+    # An adapter that derives the type must be able to tell this from a --type the caller gave.
+    if [ -z "$opt_type" ]; then
+        opt_type=$(board_config_get .defaults.type)
+        [ -z "$opt_type" ] || opt_type_default=1
+    fi
     issue_intent >"$BOARD_TMP/intent"
     board_doc=$(board_call issue_create <"$BOARD_TMP/intent") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
@@ -349,6 +364,11 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub: a draft item takes only --title, --body and --status.
+  GitLab: a parent the type does not allow is exit 3 with the reason and nothing written: an Issue
+          has none. Add --type Task to convert it in the same call. --priority needs
+          [board.priority]: exit 3 otherwise. --add-label naming a declared status or priority is
+          that change. A line of the body starting with / stays text: GitLab does not run it as a
+          quick action.
 
 EXAMPLES
   board issue edit KAN-1 --title "A better title"
@@ -420,8 +440,8 @@ PLATFORM NOTES
         ones it has.
   GitHub: the project's built-in workflows may act on the move a few seconds later: Done closes the
           issue, and closing sets Done. Read the issue again before relying on a final state.
-  GitLab: on Free a status is a label. board removes the other status labels, and a status mapped
-          to done also closes the issue.
+  GitLab: on Free a status is a label. board removes the other status labels in the same call. A
+          status mapped to done or canceled also closes the issue, and any other reopens it.
 
 EXAMPLES
   board issue move KAN-1 "In Progress"
@@ -464,6 +484,7 @@ PLATFORM NOTES
   Jira: --reason canceled needs a status declared canceled in [board.statuses].
   GitHub: --reason canceled closes the issue as not planned. The built-in workflow "Item closed"
           may then set the status to Done.
+  GitLab: with no status declared for the reason, the issue just closes and loses its status label.
 
 EXAMPLES
   board issue close KAN-1
@@ -670,6 +691,7 @@ OUTPUT
 PLATFORM NOTES
   GitHub: a draft item has no comments: exit 3.
   Jira: the body is converted from markdown to wiki markup, best effort.
+  GitLab: a line starting with / stays text: GitLab does not run it as a quick action.
 
 EXAMPLES
   board issue comment add KAN-1 --body "Fixed in 1.2"
