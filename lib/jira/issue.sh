@@ -48,7 +48,12 @@ jira_step() {
 
 jira_me() {
     jira_me_doc=$(jira_call GET /rest/api/2/myself) || return $?
-    printf '%s' "$jira_me_doc" | _jq -r '.accountId // .name'
+    jira_me_id=$(printf '%s' "$jira_me_doc" | _jq -r '.accountId // .name // ""')
+    [ -n "$jira_me_id" ] || {
+        board_warn "Jira did not say who is logged in on $JIRA_HOST"
+        return "$BOARD_EXIT_ERROR"
+    }
+    printf '%s' "$jira_me_id"
 }
 
 # An accountId is opaque and no search takes it, so what looks like one is used as it is.
@@ -76,13 +81,10 @@ jira_user_id() {
         jira_ui_param=username
     fi
     jira_ui_doc=$(jira_call GET "/rest/api/2/user/assignable/search?project=$JIRA_PROJECT&$jira_ui_param=$(board_urlencode "$1")&maxResults=50") || return $?
-    # An exact match wins, so a search for Ann does not stop at Anna.
+    # The search is fuzzy, and a near match would assign the wrong person, so only the whole name counts.
     jira_ui_hit=$(printf '%s' "$jira_ui_doc" | _jq -c --arg q "$1" '
         '"$BOARD_LIB"'
-        def exact: [.accountId, .name, .displayName, .emailAddress] | any(.[]; ieq($q));
-        (map(select(exact))) as $exact
-        | (if ($exact | length) == 1 then $exact else . end)
-        | map(jira_user)')
+        map(select([.accountId, .name, .displayName, .emailAddress] | any(.[]; ieq($q))) | jira_user)')
     case $(printf '%s' "$jira_ui_hit" | _jq -r length) in
         0)
             board_warn "no member '$1' can be assigned in $JIRA_PROJECT"
@@ -250,19 +252,29 @@ jira_issue_reopen() {
 
 # --- parent --------------------------------------------------------------------------------
 
-# Usage: jira_type_id <name>  — an issue type of the project by name, or nothing.
+# Usage: jira_type_id <name> [project]  — an issue type by name, or exit 2 with the ones there are.
 jira_type_id() {
-    jira_ti_doc=$(jira_project) || return $?
-    printf '%s' "$jira_ti_doc" | _jq -r --arg n "$1" '
-        '"$BOARD_LIB"' [.issueTypes[] | select(.name | ieq($n)) | .id] | first // ""'
+    jira_ti_doc=$(jira_project "${2:-}") || return $?
+    jira_ti_id=$(printf '%s' "$jira_ti_doc" | _jq -r --arg n "$1" '
+        '"$BOARD_LIB"' [.issueTypes[] | select(.name | ieq($n)) | .id | tostring] | first // ""')
+    [ -n "$jira_ti_id" ] ||
+        board_usage_die "no issue type '$1': the project has $(printf '%s' "$jira_ti_doc" | _jq -r '[.issueTypes[].name] | join(", ")')"
+    printf '%s' "$jira_ti_id"
 }
 
-# The name of the project's subtask type, or exit 3.
+# Usage: jira_type_level <name> [project]  — how high a type sits, or exit 2.
+jira_type_level() {
+    jira_type_id "$1" "${2:-}" >/dev/null || return $?
+    printf '%s' "$jira_ti_doc" | _jq -r --arg n "$1" '
+        '"$BOARD_LIB"' [.issueTypes[] | select(.name | ieq($n)) | jira_level | tostring] | first'
+}
+
+# The name of a project's subtask type, or exit 3. Usage: jira_subtask_type [project]
 jira_subtask_type() {
-    jira_su_doc=$(jira_project) || return $?
+    jira_su_doc=$(jira_project "${1:-}") || return $?
     jira_su_name=$(printf '%s' "$jira_su_doc" | _jq -r '[.issueTypes[] | select(.subtask) | .name] | first // ""')
     [ -n "$jira_su_name" ] || {
-        board_warn "project $JIRA_PROJECT has no subtask type"
+        board_warn "project ${1:-$JIRA_PROJECT} has no subtask type"
         return "$BOARD_EXIT_UNSUPPORTED"
     }
     printf '%s' "$jira_su_name"
@@ -284,12 +296,12 @@ jira_bulk_move() {
              inferClassificationDefaults: true, inferFieldDefaults: true, inferStatusDefaults: true,
              inferSubtaskTypeDefault: true, issueIdsOrKeys: [$id]}}}' |
         jira_send POST /rest/api/2/bulk/issues/move) || return $?
-    jira_bm_task=$(printf '%s' "$jira_bm_doc" | _jq -r '.taskId | tostring')
-    jira_safe "the task of a move" "$jira_bm_task"
+    jira_bm_task=$(jira_written "$jira_bm_doc" taskId) || return $?
     jira_bm_left=$BOARD_TIMEOUT
     while [ "$jira_bm_left" -gt 0 ]; do
         jira_bm_doc=$(jira_call GET "/rest/api/2/task/$jira_bm_task") || return $?
-        case $(printf '%s' "$jira_bm_doc" | _jq -r '.status | tostring') in
+        jira_bm_state=$(printf '%s' "$jira_bm_doc" | _jq -r '.status | tostring' 2>/dev/null) || jira_bm_state=''
+        case $jira_bm_state in
             COMPLETE)
                 printf '%s' "$jira_bm_doc" | _jq -e '(.result.failedIssues // {}) == {}' >/dev/null && return 0
                 board_warn "Jira did not move $1: $(printf '%s' "$jira_bm_doc" | _jq -c '.result.failedIssues')"
@@ -299,53 +311,92 @@ jira_bulk_move() {
                 jira_bm_left=$((jira_bm_left - 1))
                 continue
                 ;;
-            *) board_warn "Jira did not move $1: $(printf '%s' "$jira_bm_doc" | _jq -r '.message // .status | tostring')" ;;
+            FAILED | CANCELLED | CANCEL_REQUESTED | DEAD)
+                board_warn "Jira did not move $1: $(printf '%s' "$jira_bm_doc" | _jq -r '.message // .status | tostring')"
+                ;;
+            # Only a state that says so means nothing changed.
+            *)
+                jira_unknown "Jira took the move of $1, but its task cannot be read: check the board before repeating it"
+                return $?
+                ;;
         esac
         # Accepted, then refused: nothing changed, so the request does not count as a write.
         [ -z "$jira_bm_first" ] || rm -f "$BOARD_TMP/jira.wrote"
         return "$BOARD_EXIT_ERROR"
     done
-    board_timed_out
+    board_timed_out >&4
 }
 
 # Decides what a --parent asks for, before anything is written. A plain edit takes a parent one
 # level up. Between issues of one level, the child must become a subtask, which is a change of type.
-# Sets JIRA_PARENT_EDIT to true for a plain edit, and JIRA_PARENT_MOVE to a target of jira_bulk_move.
-# Usage: jira_parent_plan <id> <parent>
+# It stays in its own project, whatever the board declares. Sets JIRA_PARENT_EDIT to true for a
+# plain edit, and JIRA_PARENT_MOVE to a target of jira_bulk_move.
+# Usage: jira_parent_plan <id> <parent> [type]
 jira_parent_plan() {
     JIRA_PARENT_EDIT='' JIRA_PARENT_MOVE=''
-    jira_pp_child=$(jira_fetch "$1" issuetype) || return $?
-    jira_pp_parent=$(jira_fetch "$2" issuetype) || return $?
-    jira_pp_step=$(printf '%s\n%s\n' "$jira_pp_child" "$jira_pp_parent" | _jq -sr '
-        map(.fields.issuetype) as [$c, $p]
-        | if ($c.hierarchyLevel == null) then (if $c.subtask then "edit" elif $p.subtask then "none" else "move" end)
-          elif $c.hierarchyLevel == $p.hierarchyLevel - 1 then "edit"
-          elif $c.hierarchyLevel == 0 and $p.hierarchyLevel == 0 then "move"
-          else "none" end')
+    jira_pp_child=$(jira_fetch "$1" issuetype,project,subtasks) || return $?
+    jira_pp_parent=$(jira_fetch "$2" issuetype,project) || return $?
+    jira_pp_vars=$(printf '%s\n%s\n' "$jira_pp_child" "$jira_pp_parent" | _jq -sr '
+        '"$BOARD_LIB"'
+        .[0] as $c | .[1] as $p
+        | @sh "jira_pp_project=\($c | jira_issue_project | tostring) jira_pp_home=\($p | jira_issue_project | tostring)",
+          @sh "jira_pp_clevel=\($c.fields.issuetype | jira_level | tostring) jira_pp_plevel=\($p.fields.issuetype | jira_level | tostring)",
+          @sh "jira_pp_ctype=\($c.fields.issuetype.name // "" | tostring) jira_pp_ptype=\($p.fields.issuetype.name // "" | tostring)",
+          @sh "jira_pp_kids=\(($c.fields.subtasks // []) | map(.key | tostring) | join(", "))"') || {
+        board_warn "Jira gave an answer that cannot be read"
+        return "$BOARD_EXIT_ERROR"
+    }
+    eval "$jira_pp_vars"
+    jira_pp_type=${3:-}
+    jira_pp_tlevel=''
+    if [ -n "$jira_pp_type" ]; then
+        jira_pp_tlevel=$(jira_type_level "$jira_pp_type" "$jira_pp_project") || return $?
+    fi
+    # Decided in jq: a level comes from the board, and shell arithmetic would run what it holds.
+    jira_pp_step=$(_jq -nr --arg c "$jira_pp_clevel" --arg p "$jira_pp_plevel" --arg t "$jira_pp_tlevel" '
+        ($c | tonumber) as $c | ($p | tonumber) as $p
+        | if $t == "" then
+              (if $c == $p - 1 then "edit" elif $c == 0 and $p == 0 then "move" else "none" end)
+          else
+              ($t | tonumber) as $t
+              | if $t != $p - 1 then "bad" elif $t == $c then "edit" elif $t == -1 then "move" else "none" end
+          end') || {
+        board_warn "Jira gave a level that cannot be read"
+        return "$BOARD_EXIT_ERROR"
+    }
     case $jira_pp_step in
         edit) JIRA_PARENT_EDIT=true ;;
+        bad) board_usage_die "a $jira_pp_type cannot be a child of a $jira_pp_ptype" ;;
         move)
             [ -n "$JIRA_CLOUD" ] || {
                 board_warn "Data Center has no API to turn $1 into a subtask: move it in the browser"
                 return "$BOARD_EXIT_UNSUPPORTED"
             }
-            jira_pp_type=$(jira_subtask_type) || return $?
-            jira_pp_id=$(jira_type_id "$jira_pp_type") || return $?
-            JIRA_PARENT_MOVE=$JIRA_PROJECT,$jira_pp_id,$2
+            # Jira would carry them along, and nobody asked to change a second issue.
+            [ -z "$jira_pp_kids" ] || {
+                board_warn "$1 has subtasks, which the move would change too: $jira_pp_kids. Move those first"
+                return "$BOARD_EXIT_UNSUPPORTED"
+            }
+            [ "$jira_pp_project" = "$jira_pp_home" ] || {
+                board_warn "a subtask lives in the project of its parent: $1 is in $jira_pp_project, $2 in $jira_pp_home"
+                return "$BOARD_EXIT_UNSUPPORTED"
+            }
+            [ -n "$jira_pp_type" ] || jira_pp_type=$(jira_subtask_type "$jira_pp_project") || return $?
+            jira_pp_id=$(jira_type_id "$jira_pp_type" "$jira_pp_project") || return $?
+            JIRA_PARENT_MOVE=$jira_pp_project,$jira_pp_id,$2
             ;;
         *)
-            board_warn "Jira has no way to put $1 under $2: $(printf '%s\n%s\n' "$jira_pp_child" "$jira_pp_parent" |
-                _jq -sr 'map(.fields.issuetype.name) | "a \(.[0]) cannot be a child of a \(.[1])"')"
+            board_warn "Jira has no way to put $1 under $2: a ${jira_pp_type:-$jira_pp_ctype} cannot become a child of a $jira_pp_ptype here"
             return "$BOARD_EXIT_UNSUPPORTED"
             ;;
     esac
 }
 
-# The same for --clear parent. A subtask must have a parent, so it first stops being a subtask.
-# Usage: jira_parent_clear_plan <id>
+# The same for --clear parent. A subtask must have a parent, so it first stops being a subtask, and
+# it stays in its own project. Usage: jira_parent_clear_plan <id> [type]
 jira_parent_clear_plan() {
     JIRA_PARENT_EDIT='' JIRA_PARENT_MOVE=''
-    jira_pc_doc=$(jira_fetch "$1" issuetype,parent) || return $?
+    jira_pc_doc=$(jira_fetch "$1" issuetype,parent,project) || return $?
     case $(printf '%s' "$jira_pc_doc" | _jq -r '
         if .fields.parent == null then "none" elif .fields.issuetype.subtask then "move" else "edit" end') in
         none) ;;
@@ -355,13 +406,10 @@ jira_parent_clear_plan() {
                 board_warn "Data Center has no API to turn subtask $1 into an issue: move it in the browser"
                 return "$BOARD_EXIT_UNSUPPORTED"
             }
-            jira_pc_type=$(jira_default_type)
-            jira_pc_id=$(jira_type_id "$jira_pc_type") || return $?
-            [ -n "$jira_pc_id" ] || {
-                board_warn "project $JIRA_PROJECT has no type '$jira_pc_type' to turn subtask $1 into: set [board.defaults] type"
-                return "$BOARD_EXIT_UNSUPPORTED"
-            }
-            JIRA_PARENT_MOVE=$JIRA_PROJECT,$jira_pc_id
+            jira_pc_project=$(printf '%s' "$jira_pc_doc" | _jq -r ''"$BOARD_LIB"' jira_issue_project | tostring')
+            jira_pc_type=${2:-$(jira_default_type)}
+            jira_pc_id=$(jira_type_id "$jira_pc_type" "$jira_pc_project") || return $?
+            JIRA_PARENT_MOVE=$jira_pc_project,$jira_pc_id
             ;;
     esac
 }
@@ -409,6 +457,8 @@ jira_finish() {
 
 jira_issue_create() {
     jira_require_project
+    # There is no id until the answer says so, and an inherited one would be a false promise.
+    BOARD_WRITE_ID=''
     jira_cr_intent=$(cat)
     jira_check_priority "$jira_cr_intent" || return $?
     if printf '%s' "$jira_cr_intent" | _jq -e '.assignees | length > 1' >/dev/null; then
@@ -430,30 +480,38 @@ jira_issue_create() {
     fi
     if [ -n "$jira_cr_parent" ]; then
         jira_cr_ids=$(jira_ids_set "$jira_cr_ids" parent "$(_jq -n --arg v "$jira_cr_parent" '$v')")
+        jira_cr_doc=$(jira_fetch "$jira_cr_parent" issuetype) || return $?
+        jira_cr_level=$(printf '%s' "$jira_cr_doc" | _jq -r ''"$BOARD_LIB"' .fields.issuetype | jira_level | tostring')
         # The command puts the declared default in the intent, so that type is not a choice here:
         # the default is an ordinary type, which Jira refuses under anything but an epic.
         if [ -z "$jira_cr_type" ] || [ "$jira_cr_type" = "$(board_config_get .defaults.type)" ]; then
-            jira_cr_doc=$(jira_fetch "$jira_cr_parent" issuetype) || return $?
             # Under an epic a child is an ordinary issue; under anything else it is a subtask.
-            if [ "$(printf '%s' "$jira_cr_doc" | _jq -r '.fields.issuetype.hierarchyLevel // 0 | tostring')" -gt 0 ]; then
+            if _jq -ne --arg l "$jira_cr_level" '($l | tonumber) > 0' >/dev/null; then
                 jira_cr_type=$(jira_default_type)
             else
                 jira_cr_type=$(jira_subtask_type) || return $?
             fi
+        else
+            jira_cr_tlevel=$(jira_type_level "$jira_cr_type") || return $?
+            _jq -ne --arg t "$jira_cr_tlevel" --arg l "$jira_cr_level" '($t | tonumber) == ($l | tonumber) - 1' >/dev/null ||
+                board_usage_die "a $jira_cr_type cannot be a child of $jira_cr_parent"
         fi
     fi
     [ -n "$jira_cr_type" ] || jira_cr_type=$(jira_default_type)
+    jira_cr_id=$(jira_type_id "$jira_cr_type") || return $?
+    jira_cr_ids=$(jira_ids_set "$jira_cr_ids" type "$(_jq -n --arg v "$jira_cr_id" '$v')")
     jira_cr_sprint_id=''
     if [ -n "$jira_cr_sprint" ]; then
         board_provider_load sprint
         jira_cr_sprint_id=$(jira_sprint_id "$jira_cr_sprint") || return $?
     fi
-    jira_cr_doc=$(printf '%s' "$jira_cr_intent" | _jq -c --arg project "$JIRA_PROJECT" --arg type "$jira_cr_type" \
-        --arg cloud "$JIRA_CLOUD" --argjson ids "$jira_cr_ids" '
+    jira_cr_doc=$(printf '%s' "$jira_cr_intent" | _jq -c --arg project "$JIRA_PROJECT" \
+        --arg cloud "$JIRA_CLOUD" --argjson ids "$jira_cr_ids" --argjson cfg "$BOARD_CONFIG_JSON" '
         '"$BOARD_LIB"'
-        {fields: (jira_fields($cloud; $ids) + {project: {key: $project}, issuetype: {name: $type}, labels})}' |
+        {fields: (jira_fields($cloud; $ids; $cfg) + {project: {key: $project}, labels})}' |
         jira_send POST /rest/api/2/issue) || return $?
-    jira_cr_key=$(printf '%s' "$jira_cr_doc" | _jq -r .key)
+    jira_cr_key=$(jira_written "$jira_cr_doc" key) || return $?
+    BOARD_WRITE_ID=$jira_cr_key
     if [ -n "$jira_cr_status" ]; then
         jira_step "$jira_cr_key" "the status" jira_move "$jira_cr_key" "$jira_cr_status" || return $?
     fi
@@ -492,7 +550,7 @@ jira_issue_edit() {
     jira_check_priority "$jira_ie_intent" || return $?
     eval "$(printf '%s' "$jira_ie_intent" | _jq -r '
         def s: . // "" | tostring;
-        @sh "jira_ie_status=\(.status | s) jira_ie_parent=\(.parent | s) jira_ie_sprint=\(.sprint | s) jira_ie_milestone=\(.milestone | s) jira_ie_clear_parent=\((.clear | index("parent")) != null | tostring)"')"
+        @sh "jira_ie_status=\(.status | s) jira_ie_type=\(.type | s) jira_ie_parent=\(.parent | s) jira_ie_sprint=\(.sprint | s) jira_ie_milestone=\(.milestone | s) jira_ie_clear_parent=\((.clear | index("parent")) != null | tostring)"')"
     JIRA_MOVE_ID=''
     [ -z "$jira_ie_status" ] || jira_move_plan "$1" "$jira_ie_status" || return $?
     jira_ie_ids=$(jira_edit_assignee "$1" "$jira_ie_intent" '{}') || return $?
@@ -502,15 +560,22 @@ jira_issue_edit() {
     fi
     JIRA_PARENT_EDIT='' JIRA_PARENT_MOVE=''
     if [ -n "$jira_ie_parent" ]; then
-        jira_parent_plan "$1" "$jira_ie_parent" || return $?
+        jira_parent_plan "$1" "$jira_ie_parent" "$jira_ie_type" || return $?
         if [ -n "$JIRA_PARENT_EDIT" ]; then
             jira_ie_ids=$(jira_ids_set "$jira_ie_ids" parent "$(_jq -n --arg v "$jira_ie_parent" '$v')")
         fi
     elif [ "$jira_ie_clear_parent" = true ]; then
-        jira_parent_clear_plan "$1" || return $?
+        jira_parent_clear_plan "$1" "$jira_ie_type" || return $?
         if [ -n "$JIRA_PARENT_EDIT" ]; then
             jira_ie_ids=$(jira_ids_set "$jira_ie_ids" parent null)
         fi
+    fi
+    # Jira answers 204 to a type it does not know, and changes nothing. A move sets the type itself.
+    if [ -n "$jira_ie_type" ] && [ -z "$JIRA_PARENT_MOVE" ]; then
+        jira_ie_doc=$(jira_fetch "$1" project) || return $?
+        jira_ie_project=$(printf '%s' "$jira_ie_doc" | _jq -r ''"$BOARD_LIB"' jira_issue_project | tostring')
+        jira_ie_id=$(jira_type_id "$jira_ie_type" "$jira_ie_project") || return $?
+        jira_ie_ids=$(jira_ids_set "$jira_ie_ids" type "$(_jq -n --arg v "$jira_ie_id" '$v')")
     fi
     jira_ie_sprint_id=''
     if [ -n "$jira_ie_sprint" ]; then
@@ -520,9 +585,10 @@ jira_issue_edit() {
         board_provider_load sprint
         jira_sprints active >/dev/null || return $?
     fi
-    jira_ie_patch=$(printf '%s' "$jira_ie_intent" | _jq -c --arg cloud "$JIRA_CLOUD" --argjson ids "$jira_ie_ids" '
+    jira_ie_patch=$(printf '%s' "$jira_ie_intent" | _jq -c --arg cloud "$JIRA_CLOUD" --argjson ids "$jira_ie_ids" \
+        --argjson cfg "$BOARD_CONFIG_JSON" '
         '"$BOARD_LIB"'
-        jira_fields($cloud; $ids) as $fields
+        jira_fields($cloud; $ids; $cfg) as $fields
         | jira_label_update as $labels
         | (if $fields == {} then {} else {fields: $fields} end)
           + (if $labels == [] then {} else {update: {labels: $labels}} end)')
@@ -538,6 +604,7 @@ jira_issue_edit() {
 
 jira_issue_delete() {
     jira_safe "<id>" "$1"
+    BOARD_WRITE_ID=$1
     jira_call DELETE "/rest/api/2/issue/$1" >/dev/null
 }
 
@@ -561,23 +628,27 @@ jira_issue_comment_list() {
 # Usage: jira_comment_write <method> <path> <key>  — the intent on stdin.
 jira_comment_write() {
     jira_cw_doc=$(_jq -c ''"$BOARD_LIB"' {body: (.body | md2wiki)}' | jira_send "$1" "$2") || return $?
+    jira_written "$jira_cw_doc" id >/dev/null || return $?
     printf '%s' "$jira_cw_doc" | _jq -c --arg base "$JIRA_BASE" --arg key "$3" ''"$BOARD_LIB"' jira_comment($base; $key)'
 }
 
 jira_issue_comment_add() {
     jira_safe "<id>" "$1"
+    BOARD_WRITE_ID=''
     jira_comment_write POST "/rest/api/2/issue/$1/comment" "$1"
 }
 
 jira_issue_comment_edit() {
     jira_safe "<id>" "$1"
     jira_safe "<comment-id>" "$2"
+    BOARD_WRITE_ID=$2
     jira_comment_write PUT "/rest/api/2/issue/$1/comment/$2" "$1"
 }
 
 jira_issue_comment_delete() {
     jira_safe "<id>" "$1"
     jira_safe "<comment-id>" "$2"
+    BOARD_WRITE_ID=$2
     jira_call DELETE "/rest/api/2/issue/$1/comment/$2" >/dev/null
 }
 
@@ -628,7 +699,7 @@ jira_issue_link_remove() {
     jira_safe "<other-id>" "$2"
     jira_lr_doc=$(jira_fetch "$1" issuelinks) || return $?
     jira_lr_ids=$(printf '%s' "$jira_lr_doc" | _jq -r --arg id "$2" --arg t "$3" '
-        '"$BOARD_LIB"' .fields.issuelinks | jira_links | .[] | select(.id == $id and .type == $t) | .link | tostring')
+        '"$BOARD_LIB"' .fields.issuelinks | jira_links | .[] | select(.id == $id and .type == $t and .link != null) | .link | tostring')
     for jira_lr_id in $jira_lr_ids; do
         jira_safe "a link" "$jira_lr_id"
         jira_call DELETE "/rest/api/2/issueLink/$jira_lr_id" >/dev/null ||

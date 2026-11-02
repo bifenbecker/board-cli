@@ -124,7 +124,8 @@ PLATFORM NOTES
   GitHub: lists the items of the project in project order, draft items included, pull requests
           left out. --search reads every page it has to, so it is slower on a big project.
   GitLab: --category needs [board.statuses]: an open issue with no status label has no category.
-  Jira: --status with a name no status has lists nothing on Cloud, and is not an error.
+  Jira: --status with a name no status has lists nothing on Cloud, and is not an error. --search
+        takes words: each is matched as it stands, so AND, OR, NOT and * are text, not operators.
   Linear: --type is not supported; there are no issue types.
 
 EXAMPLES
@@ -273,10 +274,16 @@ OUTPUT
 PLATFORM NOTES
   GitHub: the issue is created in the repository of [board] url and added to the project. Issue
           types exist only in organisations: exit 3 for --type elsewhere.
-  Jira: description is converted from markdown to wiki markup, best effort. One assignee only: a
-        second is exit 3. Without --type: the project's subtask type under --parent (an ordinary
-        type under an epic), else [board.defaults] type, else Task. --priority none is exit 3 on
-        Cloud: every issue keeps a priority.
+  Jira: description is converted from markdown to wiki markup, best effort: code blocks and spans,
+        links, lists, tables and emphasis survive a round trip. Not kept: the language of a code
+        block that holds {code}, underline and colour, alt text of an image, and a block holding
+        both {code} and {noformat} ends early. A line over 3,000 characters, or a text with over
+        3,000 lines of markup, goes out unconverted, with a warning on stderr.
+        One assignee only: a second is exit 3. --assignee is the exact name, email or id: anything
+        else is exit 4. --type must be a type of the project and fit --parent, else exit 2. Without
+        --type: the project's subtask type under --parent (an ordinary type under an epic), else
+        [board.defaults] type, else Task. --priority none is exit 3 on Cloud: every issue keeps a
+        priority.
   Linear: one assignee only. --type is not supported.
   GitLab: on Free one assignee only.
 
@@ -354,11 +361,15 @@ OUTPUT
 PLATFORM NOTES
   GitHub: a draft item takes only --title, --body and --status.
   Jira: a parent must be one level up. --parent on an issue of the same level as the parent turns
-        it into a subtask, and --clear parent on a subtask turns it back into [board.defaults]
-        type, else Task: both change its type, on Cloud only, and are exit 3 on Data Center. Any
-        other pair of levels is exit 3. --priority none and --clear priority are exit 3 on Cloud:
-        every issue keeps a priority. One assignee only: add a second and it is exit 3, unless
-        the first is removed in the same call. --sprint needs [board.target] board.
+        it into a subtask, and --clear parent on a subtask turns it back into --type, else
+        [board.defaults] type, else Task: both change its type, on Cloud only, and are exit 3 on
+        Data Center. An issue with subtasks is not turned into one: exit 3 names them. An issue
+        stays in its own project, whatever [board] project says. Any other pair of levels is exit
+        3. --type must be a type of the project and fit --parent, else exit 2. --priority none and
+        --clear priority are exit 3 on Cloud: every issue keeps a priority. One assignee only: add
+        a second and it is exit 3, unless the first is removed in the same call. An assignee is
+        the exact name, email or id: anything else is exit 4. --sprint needs [board.target] board.
+        The markdown limits of 'board issue create' apply to --body.
 
 EXAMPLES
   board issue edit KAN-1 --title "A better title"

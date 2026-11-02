@@ -90,6 +90,49 @@ view_answers() {
 
 # --- trust ---------------------------------------------------------------------------------
 
+test_an_inherited_trust_flag_is_not_trust() {
+    evil_board https://evil.example
+    JIRA_TRUSTED=1 JIRA_READY=1
+    export JIRA_TRUSTED JIRA_READY
+    t_run board auth status
+    t_status 5
+    no_request
+}
+
+test_an_inherited_move_is_not_run() {
+    cloud_board
+    create_answers
+    JIRA_PARENT_MOVE=KAN,1,KAN-9
+    export JIRA_PARENT_MOVE
+    t_run board issue create --title t
+    t_status 0
+    t_lacks "$(cat "$FAKE_LOG")" bulk
+}
+
+test_a_relative_config_file_cannot_vouch_for_a_host() {
+    evil_board https://evil.example
+    printf 'server: https://evil.example\nlogin: me\n' >"$T_TMP/repo.yml"
+    for path in repo.yml ./repo.yml ../"$(basename "$T_TMP")"/repo.yml; do
+        JIRA_CONFIG_FILE=$path
+        export JIRA_CONFIG_FILE
+        t_run board auth status
+        t_status 5
+        t_contains "$T_ERR" relative
+        no_request
+    done
+}
+
+test_a_relative_config_file_changes_nothing_for_a_listed_host() {
+    evil_board https://jira.corp.example
+    BOARD_JIRA_HOSTS=jira.corp.example
+    JIRA_CONFIG_FILE=repo.yml
+    export BOARD_JIRA_HOSTS JIRA_CONFIG_FILE
+    printf 'login: me\n' >"$T_TMP/repo.yml"
+    printf '{"name":"me"}' | ans GET_rest_api_2_myself
+    t_run board auth status
+    t_status 0
+}
+
 test_repository_url_alone_is_not_trusted() {
     evil_board https://evil.example
     t_run board issue list
@@ -288,13 +331,16 @@ exec "$BOARD_TEST_ROOT/tests/fake/curl" "\$@"
 EOF
     chmod +x "$T_TMP/bin/curl"
     PATH=$T_TMP/bin:$PATH
-    printf '{"id":"1","key":"KAN-1"}' | ans POST_rest_api_2_issue
-    view_answers
+    create_answers
     t_run board issue create --title "secret body test" --body "the body" --json
     t_status 0
     t_lacks "$(cat "$T_TMP/argv")" "$JIRA_T_TOKEN" argv
     t_lacks "$(cat "$T_TMP/argv")" "the body" argv
     t_lacks "$T_OUT$T_ERR" "$JIRA_T_TOKEN" output
+    case $(sed -n 1p "$T_TMP/argv") in
+        '-q '*) ;;
+        *) t_fail "curl -q must come first, or ~/.curlrc is read: $(sed -n 1p "$T_TMP/argv")" ;;
+    esac
 }
 
 test_a_quote_in_a_login_cannot_add_a_curl_option() {
@@ -444,16 +490,35 @@ test_404_with_a_bad_login_is_exit_5() {
     t_status 5
 }
 
-test_a_bad_token_on_myself_does_not_loop() {
+test_only_401_and_403_on_myself_mean_the_login() {
     cloud_board
-    printf '{}' | ans GET_rest_api_2_myself 404
+    printf 'no' | ans GET_rest_api_2_myself 401
     t_run board auth status
     t_status 5
+    printf 'no' | ans GET_rest_api_2_myself 403
+    t_run board auth status
+    t_status 5
+    printf '{}' | ans GET_rest_api_2_myself 404
+    t_run board auth status
+    t_status 1
+    printf 'down' | ans GET_rest_api_2_myself 500
+    t_run board auth status
+    t_status 1
+}
+
+test_myself_failing_after_a_404_is_not_called_a_bad_login() {
+    cloud_board
+    printf '[]' | ans GET_rest_api_2_field
+    printf '{"errorMessages":["gone"]}' | ans GET_rest_api_2_issue_KAN-9 404
+    printf 'down' | ans GET_rest_api_2_myself 503
+    t_run board issue view KAN-9
+    t_status 1
     t_eq "$(grep -c myself "$FAKE_LOG")" 1 'calls to myself'
 }
 
 test_400_joins_messages_and_errors() {
     cloud_board
+    project_answer
     printf '{"errorMessages":["first"],"errors":{"summary":"second"}}' | ans POST_rest_api_2_issue 400
     printf '{"accountId":"a"}' | ans GET_rest_api_2_myself
     t_run board issue create --title t
@@ -464,6 +529,7 @@ test_400_joins_messages_and_errors() {
 
 test_400_with_a_bad_login_is_exit_5() {
     cloud_board
+    project_answer
     printf '{"errorMessages":["The target project does not exist"]}' | ans POST_rest_api_2_issue 400
     printf 'no' | ans GET_rest_api_2_myself 401
     t_run board issue create --title t
@@ -494,13 +560,126 @@ curl_exits() {
     PATH=$T_TMP/bin:$PATH
 }
 
+# Usage: curl_fails_writes <status>  — reads are answered as usual, and anything else ends with this.
+curl_fails_writes() {
+    mkdir -p "$T_TMP/bin"
+    cat >"$T_TMP/bin/curl" <<EOF
+#!/bin/sh
+config=\$(cat)
+case \$config in
+    *'request = "GET"'*)
+        printf '%s\n' "\$config" | "$BOARD_TEST_ROOT/tests/fake/curl" "\$@"
+        exit \$?
+        ;;
+esac
+exit $1
+EOF
+    chmod +x "$T_TMP/bin/curl"
+    PATH=$T_TMP/bin:$PATH
+}
+
 test_curl_failing_to_connect_is_exit_1() {
     cloud_board
     curl_exits 7
     t_run board status list
     t_status 1
     t_contains "$T_ERR" site.atlassian.net
+}
+
+test_a_write_that_cannot_have_arrived_is_exit_1() {
+    for code in 6 7 35 60; do
+        cloud_board
+        view_answers
+        curl_fails_writes "$code"
+        t_run board issue edit KAN-1 --title new
+        t_status 1
+        t_eq "$T_OUT" '' stdout
+    done
+}
+
+test_a_write_that_may_have_arrived_is_exit_6_with_the_id() {
+    for code in 18 28 52 55 56 92 124; do
+        cloud_board
+        view_answers
+        curl_fails_writes "$code"
+        t_run board issue edit KAN-1 --title new
+        t_status 6
+        t_eq "$T_OUT" KAN-1 stdout
+    done
+}
+
+test_a_create_that_may_have_arrived_is_exit_6_with_no_id_to_give() {
+    cloud_board
+    create_answers
+    curl_fails_writes 56
     t_run board issue create --title t
+    t_status 6
+    t_eq "$T_OUT" '' stdout
+}
+
+test_a_later_step_breaking_gives_the_id_once() {
+    cloud_board
+    move_answers
+    printf '' | ans PUT_rest_api_2_issue_KAN-1 204
+    mkdir -p "$T_TMP/bin"
+    cat >"$T_TMP/bin/curl" <<EOF
+#!/bin/sh
+config=\$(cat)
+case \$config in
+    *'request = "POST"'*) exit 56 ;;
+esac
+printf '%s\n' "\$config" | exec "$BOARD_TEST_ROOT/tests/fake/curl" "\$@"
+EOF
+    chmod +x "$T_TMP/bin/curl"
+    PATH=$T_TMP/bin:$PATH
+    t_run board issue edit KAN-1 --title new --status Done
+    t_status 6
+    t_eq "$T_OUT" KAN-1 stdout
+}
+
+test_an_inherited_write_id_is_not_promised() {
+    cloud_board
+    create_answers
+    BOARD_WRITE_ID=KAN-777
+    export BOARD_WRITE_ID
+    curl_fails_writes 56
+    t_run board issue create --title t
+    t_status 6
+    t_eq "$T_OUT" '' stdout
+}
+
+test_the_id_of_a_comment_is_given_when_its_edit_breaks() {
+    cloud_board
+    curl_fails_writes 56
+    t_run board issue comment edit KAN-1 10 --body new
+    t_status 6
+    t_eq "$T_OUT" 10 stdout
+}
+
+test_a_gateway_error_on_a_write_is_exit_6_with_the_id() {
+    for code in 502 503 504; do
+        cloud_board
+        view_answers
+        printf 'bad gateway' | ans PUT_rest_api_2_issue_KAN-1 "$code"
+        t_run board issue edit KAN-1 --title new
+        t_status 6
+        t_eq "$T_OUT" KAN-1 stdout
+    done
+}
+
+test_a_gateway_error_on_a_read_is_exit_1() {
+    cloud_board
+    printf 'bad gateway' | ans GET_rest_api_2_project_KAN_statuses 502
+    t_run board status list
+    t_status 1
+    t_eq "$T_OUT" '' stdout
+}
+
+test_a_gateway_error_on_a_search_is_exit_1() {
+    cloud_board
+    printf '[]' | ans GET_rest_api_2_field
+    printf 'bad gateway' | ans POST_rest_api_2_search_jql 503
+    t_run board issue list
     t_status 1
 }
 
@@ -512,18 +691,79 @@ test_a_timed_out_read_is_exit_1() {
     t_contains "$T_ERR" 'timed out'
 }
 
-test_a_timed_out_write_is_exit_6() {
+# --- an answer that cannot be used -----------------------------------------------------------
+
+test_a_create_answered_with_no_key_is_exit_6_and_no_null() {
     cloud_board
-    curl_exits 124
+    create_answers
+    printf '{}' | ans POST_rest_api_2_issue
     t_run board issue create --title t
     t_status 6
+    t_lacks "$T_OUT" null stdout
 }
 
-test_a_connection_broken_during_a_write_is_exit_6() {
+test_a_create_answered_with_garbage_is_exit_6() {
     cloud_board
-    curl_exits 56
+    create_answers
+    printf '<html>ok</html>' | ans POST_rest_api_2_issue
     t_run board issue create --title t
     t_status 6
+    t_eq "$T_OUT" '' stdout
+}
+
+test_a_create_answered_with_a_hostile_key_is_exit_6() {
+    cloud_board
+    create_answers
+    printf '{"key":"../x"}' | ans POST_rest_api_2_issue
+    t_run board issue create --title t
+    t_status 6
+    t_eq "$T_OUT" '' stdout
+}
+
+test_a_comment_answered_with_no_id_is_exit_6() {
+    cloud_board
+    printf '{}' | ans POST_rest_api_2_issue_KAN-1_comment
+    t_run board issue comment add KAN-1 --body hi --json
+    t_status 6
+    t_lacks "$T_OUT" null stdout
+}
+
+test_a_milestone_answered_with_no_id_is_exit_6() {
+    cloud_board
+    printf '{}' | ans POST_rest_api_2_version
+    t_run board milestone create --name v1 --json
+    t_status 6
+    t_lacks "$T_OUT" null stdout
+}
+
+test_a_move_answered_with_no_task_is_exit_6_with_the_id() {
+    cloud_board
+    view_answers
+    parent_answers
+    printf '{}' | ans POST_rest_api_2_bulk_issues_move
+    t_run board issue edit KAN-1 --parent KAN-2
+    t_status 6
+    t_eq "$T_OUT" KAN-1 stdout
+}
+
+test_a_move_whose_task_cannot_be_read_is_exit_6_with_the_id() {
+    cloud_board
+    view_answers
+    parent_answers
+    printf '{"taskId":"77"}' | ans POST_rest_api_2_bulk_issues_move
+    printf '<html>' | ans GET_rest_api_2_task_77
+    t_run board issue edit KAN-1 --parent KAN-2
+    t_status 6
+    t_eq "$T_OUT" KAN-1 stdout
+}
+
+test_myself_with_no_id_is_not_an_assignee() {
+    cloud_board
+    create_answers
+    printf '{}' | ans GET_rest_api_2_myself
+    t_run board issue create --title t --assignee @me
+    t_status 1
+    t_lacks "$(cat "$FAKE_LOG")" POST
 }
 
 test_a_read_timing_out_before_a_write_is_exit_1() {
@@ -531,12 +771,12 @@ test_a_read_timing_out_before_a_write_is_exit_1() {
     curl_exits 124
     t_run board issue edit KAN-1 --add-assignee 222222222222222222222222
     t_status 1
+    t_eq "$T_OUT" '' stdout
 }
 
 test_a_failed_read_back_after_create_is_partial() {
     cloud_board
-    printf '{"id":"1","key":"KAN-1"}' | ans POST_rest_api_2_issue
-    printf '[]' | ans GET_rest_api_2_field
+    create_answers
     printf 'down' | ans GET_rest_api_2_issue_KAN-1 500
     t_run board issue create --title t
     t_status 6
@@ -696,17 +936,39 @@ b')
     t_contains "$got" 'issuetype = "a\nb"'
 }
 
-test_free_text_escapes_lucene_then_jql() {
+test_lucene_word_operators_stay_words() {
     cloud_board
-    got=$(jql_of --search 'c++ "q" (x)')
-    t_contains "$got" 'summary ~ "c\\+\\+ \\\"q\\\" \\(x\\)"'
-    t_contains "$got" 'OR description ~'
+    got=$(jql_of --search 'NOT x')
+    t_contains "$got" 'summary ~ "\"NOT\" \"x\""'
+    got=$(jql_of --search 'x OR y')
+    t_contains "$got" 'summary ~ "\"x\" \"OR\" \"y\""'
+    got=$(jql_of --search 'x AND y')
+    t_contains "$got" 'summary ~ "\"x\" \"AND\" \"y\""'
+    t_contains "$got" 'OR description ~ "\"x\" \"AND\" \"y\""'
+}
+
+test_lucene_symbols_stay_text() {
+    cloud_board
+    got=$(jql_of --search 'c++ (x) a* && !b ~c')
+    t_contains "$got" 'summary ~ "\"c++\" \"(x)\" \"a*\" \"&&\" \"!b\" \"~c\""'
+}
+
+test_a_quote_and_a_backslash_in_free_text_stay_inside_their_word() {
+    cloud_board
+    got=$(jql_of --search 'say "hi" c:\d')
+    t_contains "$got" 'summary ~ "\"say\" \"\\\"hi\\\"\" \"c:\\\\d\""'
+}
+
+test_a_search_of_only_spaces_adds_no_clause() {
+    cloud_board
+    got=$(jql_of --search '   ')
+    t_lacks "$got" 'summary ~'
 }
 
 test_cyrillic_passes_through_a_search() {
     cloud_board
     got=$(jql_of --search 'кириллица')
-    t_contains "$got" 'summary ~ "кириллица"'
+    t_contains "$got" 'summary ~ "\"кириллица\""'
 }
 
 test_filters_become_clauses() {
@@ -861,9 +1123,17 @@ test_data_center_may_empty_a_priority() {
     t_jq "$(sent_bodies)" .fields.priority null
 }
 
+project_answer() {
+    printf '{"issueTypes":[{"id":"1","name":"Task","subtask":false,"hierarchyLevel":0},
+        {"id":"2","name":"Story","subtask":false,"hierarchyLevel":0},
+        {"id":"3","name":"Epic","subtask":false,"hierarchyLevel":1},
+        {"id":"5","name":"Sub-task","subtask":true,"hierarchyLevel":-1}]}' | ans "GET_rest_api_2_project_${1:-KAN}"
+}
+
 create_answers() {
     printf '{"id":"1","key":"KAN-1"}' | ans POST_rest_api_2_issue
     view_answers
+    project_answer
 }
 
 test_create_defaults_to_task() {
@@ -871,7 +1141,7 @@ test_create_defaults_to_task() {
     create_answers
     t_run board issue create --title t --json
     t_status 0
-    t_jq "$(sent_bodies)" .fields.issuetype '{"name":"Task"}'
+    t_jq "$(sent_bodies)" .fields.issuetype '{"id":"1"}'
 }
 
 test_create_takes_the_declared_default_type() {
@@ -880,13 +1150,12 @@ test_create_takes_the_declared_default_type() {
     create_answers
     t_run board issue create --title t
     t_status 0
-    t_jq "$(sent_bodies)" .fields.issuetype.name '"Story"'
+    t_jq "$(sent_bodies)" .fields.issuetype.id '"2"'
 }
 
 parent_answers() {
     issue_json KAN-2 | ans GET_rest_api_2_issue_KAN-2
-    printf '{"issueTypes":[{"id":"1","name":"Task","subtask":false},{"id":"5","name":"Sub-task","subtask":true}]}' |
-        ans GET_rest_api_2_project_KAN
+    project_answer
 }
 
 test_create_under_a_parent_picks_the_subtask_type() {
@@ -895,7 +1164,7 @@ test_create_under_a_parent_picks_the_subtask_type() {
     parent_answers
     t_run board issue create --title t --parent KAN-2
     t_status 0
-    t_jq "$(sent_bodies)" '.fields | {issuetype, parent}' '{"issuetype":{"name":"Sub-task"},"parent":{"key":"KAN-2"}}'
+    t_jq "$(sent_bodies)" '.fields | {issuetype, parent}' '{"issuetype":{"id":"5"},"parent":{"key":"KAN-2"}}'
 }
 
 test_create_under_an_epic_keeps_an_ordinary_type() {
@@ -904,7 +1173,7 @@ test_create_under_an_epic_keeps_an_ordinary_type() {
     issue_json KAN-2 | t_jq_cmd -c '.fields.issuetype.hierarchyLevel = 1' | ans GET_rest_api_2_issue_KAN-2
     t_run board issue create --title t --parent KAN-2
     t_status 0
-    t_jq "$(sent_bodies)" .fields.issuetype.name '"Task"'
+    t_jq "$(sent_bodies)" .fields.issuetype.id '"1"'
 }
 
 test_the_declared_default_does_not_stop_a_subtask() {
@@ -914,7 +1183,7 @@ test_the_declared_default_does_not_stop_a_subtask() {
     parent_answers
     t_run board issue create --title t --parent KAN-2
     t_status 0
-    t_jq "$(sent_bodies)" .fields.issuetype.name '"Sub-task"'
+    t_jq "$(sent_bodies)" .fields.issuetype.id '"5"'
 }
 
 test_the_declared_default_stays_under_an_epic() {
@@ -924,15 +1193,102 @@ test_the_declared_default_stays_under_an_epic() {
     issue_json KAN-2 | t_jq_cmd -c '.fields.issuetype.hierarchyLevel = 1' | ans GET_rest_api_2_issue_KAN-2
     t_run board issue create --title t --parent KAN-2
     t_status 0
-    t_jq "$(sent_bodies)" .fields.issuetype.name '"Story"'
+    t_jq "$(sent_bodies)" .fields.issuetype.id '"2"'
 }
 
-test_a_given_type_wins_over_the_parent() {
+test_a_given_type_that_fits_the_parent_is_kept() {
     cloud_board
     create_answers
-    t_run board issue create --title t --parent KAN-2 --type Spike
+    issue_json KAN-2 | t_jq_cmd -c '.fields.issuetype.hierarchyLevel = 1' | ans GET_rest_api_2_issue_KAN-2
+    t_run board issue create --title t --parent KAN-2 --type story
     t_status 0
-    t_jq "$(sent_bodies)" .fields.issuetype.name '"Spike"'
+    t_jq "$(sent_bodies)" .fields.issuetype.id '"2"'
+}
+
+test_a_given_type_that_cannot_go_under_the_parent_is_exit_2() {
+    cloud_board
+    create_answers
+    parent_answers
+    t_run board issue create --title t --parent KAN-2 --type Story
+    t_status 2
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+test_an_unknown_type_is_exit_2_before_create() {
+    cloud_board
+    create_answers
+    t_run board issue create --title t --type Nope
+    t_status 2
+    t_contains "$T_ERR" 'Task, Story, Epic, Sub-task'
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+test_an_unknown_type_is_exit_2_before_edit() {
+    cloud_board
+    view_answers
+    project_answer
+    t_run board issue edit KAN-1 --title new --type Nope
+    t_status 2
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+}
+
+test_a_known_type_on_edit_goes_by_id() {
+    cloud_board
+    view_answers
+    project_answer
+    printf '' | ans PUT_rest_api_2_issue_KAN-1 204
+    t_run board issue edit KAN-1 --type story
+    t_status 0
+    t_jq "$(sent_bodies)" .fields.issuetype '{"id":"2"}'
+}
+
+test_edit_with_a_parent_and_a_type_that_cannot_go_under_it_is_exit_2() {
+    cloud_board
+    view_answers
+    parent_answers
+    t_run board issue edit KAN-1 --parent KAN-2 --type Story
+    t_status 2
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+test_edit_with_a_parent_and_a_subtask_type_moves_to_that_type() {
+    cloud_board
+    view_answers
+    parent_answers
+    bulk_answers
+    t_run board issue edit KAN-1 --parent KAN-2 --type Sub-task
+    t_status 0
+    t_jq "$(sent_bodies)" '.targetToSourcesMapping | keys' '["KAN,5,KAN-2"]'
+}
+
+test_a_priority_outside_the_five_reads_through_the_declaration() {
+    cloud_board
+    printf '[board.priority]\nhigh = "P1"\n' >>"$T_TMP/workflow.toml"
+    view_answers
+    issue_json KAN-1 'To Do' new P1 | ans GET_rest_api_2_issue_KAN-1
+    t_run board issue view KAN-1 --jq .priority
+    t_eq "$T_OUT" high
+    issue_json KAN-1 'To Do' new Blocker | ans GET_rest_api_2_issue_KAN-1
+    t_run board issue view KAN-1 --json
+    t_jq "$T_OUT" .priority null
+}
+
+test_a_declared_priority_is_what_gets_written() {
+    cloud_board
+    printf '[board.priority]\nhigh = "P1"\n' >>"$T_TMP/workflow.toml"
+    printf '' | ans PUT_rest_api_2_issue_KAN-1 204
+    view_answers
+    t_run board issue edit KAN-1 --priority high
+    t_status 0
+    t_jq "$(sent_bodies)" .fields.priority '{"name":"P1"}'
+}
+
+test_a_declared_priority_is_what_gets_searched() {
+    cloud_board
+    printf '[board.priority]\nlow = "P9"\n' >>"$T_TMP/workflow.toml"
+    got=$(jql_of --priority low)
+    t_contains "$got" 'priority = "P9"'
 }
 
 test_create_with_a_status_that_is_unknown_writes_nothing() {
@@ -990,12 +1346,12 @@ test_me_is_read_from_myself() {
 
 test_several_matches_is_exit_1_listing_them() {
     cloud_board
-    printf '[{"accountId":"a1","displayName":"Ann A"},{"accountId":"a2","displayName":"Ann B"}]' |
+    printf '[{"accountId":"a1","displayName":"Ann"},{"accountId":"a2","displayName":"Ann"}]' |
         ans GET_rest_api_2_user_assignable_search
     t_run board issue create --title t --assignee Ann
     t_status 1
-    t_contains "$T_ERR" 'Ann A (a1)'
-    t_contains "$T_ERR" 'Ann B (a2)'
+    t_contains "$T_ERR" 'Ann (a1)'
+    t_contains "$T_ERR" 'Ann (a2)'
     t_lacks "$(cat "$FAKE_LOG")" POST
 }
 
@@ -1005,6 +1361,25 @@ test_an_exact_name_wins_over_a_partial_match() {
     printf '[{"accountId":"a1","displayName":"Ann"},{"accountId":"a2","displayName":"Anna"}]' |
         ans GET_rest_api_2_user_assignable_search
     t_run board issue create --title t --assignee ann
+    t_status 0
+    t_jq "$(sent_bodies)" .fields.assignee.accountId '"a1"'
+}
+
+test_a_lone_near_match_is_not_assigned() {
+    cloud_board
+    create_answers
+    printf '[{"accountId":"a2","displayName":"Anna"}]' | ans GET_rest_api_2_user_assignable_search
+    t_run board issue create --title t --assignee ann
+    t_status 4
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+test_an_email_is_an_exact_match() {
+    cloud_board
+    create_answers
+    printf '[{"accountId":"a1","displayName":"Ann","emailAddress":"ann@example.com"}]' |
+        ans GET_rest_api_2_user_assignable_search
+    t_run board issue create --title t --assignee ann@example.com
     t_status 0
     t_jq "$(sent_bodies)" .fields.assignee.accountId '"a1"'
 }
@@ -1220,6 +1595,76 @@ test_clearing_a_subtask_parent_turns_it_back_on_cloud() {
     t_jq "$(sent_bodies)" '.targetToSourcesMapping | keys' '["KAN,1"]'
 }
 
+test_a_task_with_subtasks_is_not_turned_into_one() {
+    cloud_board
+    view_answers
+    parent_answers
+    issue_json KAN-1 | t_jq_cmd -c '.fields.subtasks = [{key: "KAN-5"}, {key: "KAN-6"}]' | ans GET_rest_api_2_issue_KAN-1
+    t_run board issue edit KAN-1 --title new --parent KAN-2
+    t_status 3
+    t_contains "$T_ERR" 'KAN-5, KAN-6'
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+test_a_parent_move_stays_in_the_project_of_the_issue() {
+    cloud_board
+    view_answers OTH-1
+    issue_json OTH-2 | ans GET_rest_api_2_issue_OTH-2
+    project_answer OTH
+    bulk_answers
+    t_run board issue edit OTH-1 --parent OTH-2
+    t_status 0
+    t_jq "$(sent_bodies)" '.targetToSourcesMapping | keys' '["OTH,5,OTH-2"]'
+    t_lacks "$(cat "$FAKE_LOG")" project/KAN
+}
+
+test_clearing_a_parent_stays_in_the_project_of_the_issue() {
+    cloud_board
+    view_answers OTH-1
+    project_answer OTH
+    bulk_answers
+    issue_json OTH-1 | t_jq_cmd -c '.fields.issuetype.subtask = true | .fields.parent = {key: "OTH-2"}' |
+        ans GET_rest_api_2_issue_OTH-1
+    t_run board issue edit OTH-1 --clear parent
+    t_status 0
+    t_jq "$(sent_bodies)" '.targetToSourcesMapping | keys' '["OTH,1"]'
+}
+
+test_the_project_field_outranks_the_key_of_a_moved_issue() {
+    cloud_board
+    view_answers KAN-1
+    issue_json KAN-1 | t_jq_cmd -c '.fields.project = {key: "NEW"}' | ans GET_rest_api_2_issue_KAN-1
+    issue_json NEW-2 | ans GET_rest_api_2_issue_NEW-2
+    project_answer NEW
+    bulk_answers
+    t_run board issue edit KAN-1 --parent NEW-2
+    t_status 0
+    t_jq "$(sent_bodies)" '.targetToSourcesMapping | keys' '["NEW,5,NEW-2"]'
+}
+
+test_a_parent_in_another_project_is_exit_3() {
+    cloud_board
+    view_answers
+    issue_json OTH-2 | ans GET_rest_api_2_issue_OTH-2
+    project_answer
+    t_run board issue edit KAN-1 --parent OTH-2
+    t_status 3
+    t_contains "$T_ERR" OTH
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+test_a_type_on_an_issue_of_another_project_is_read_from_that_project() {
+    cloud_board
+    view_answers OTH-1
+    project_answer OTH
+    printf '' | ans PUT_rest_api_2_issue_OTH-1 204
+    t_run board issue edit OTH-1 --type Story
+    t_status 0
+    t_jq "$(sent_bodies)" .fields.issuetype.id '"2"'
+    t_lacks "$(cat "$FAKE_LOG")" project/KAN
+}
+
 test_clearing_a_parent_that_is_not_there_writes_nothing() {
     cloud_board
     view_answers
@@ -1385,6 +1830,49 @@ test_sprint_current_is_the_active_one_or_exit_4() {
     printf '{"isLast":true,"startAt":0,"values":[]}' | ans GET_rest_agile_1.0_board_7_sprint
     t_run board sprint current
     t_status 4
+}
+
+test_a_sprint_limit_warns_when_it_cuts_the_list() {
+    dc_board
+    sprint_answers
+    t_run board sprint list --limit 1 --json
+    t_status 0
+    t_jq "$T_OUT" length 1
+    t_contains "$T_ERR" 'showing the first 1'
+    t_run board sprint list --limit 3 --json
+    t_lacks "$T_ERR" 'showing the first'
+}
+
+test_a_milestone_limit_warns_when_it_cuts_the_list() {
+    cloud_board
+    printf '[{"id":"1","name":"a"},{"id":"2","name":"b"}]' | ans GET_rest_api_2_project_KAN_versions
+    t_run board milestone list --limit 1 --json
+    t_status 0
+    t_jq "$T_OUT" length 1
+    t_contains "$T_ERR" 'showing the first 1'
+    t_run board milestone list --limit 2 --json
+    t_lacks "$T_ERR" 'showing the first'
+}
+
+test_a_sprint_name_with_a_comma_survives_data_center() {
+    dc_board
+    printf '[{"id":"customfield_10100","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}]' | ans GET_rest_api_2_field
+    issue_json KAN-1 | t_jq_cmd -c '.fields.customfield_10100 = [
+        "com.atlassian.greenhopper.service.sprint.Sprint@2f[id=2,rapidViewId=7,state=ACTIVE,name=Now, then later,startDate=2026-02-01,endDate=<null>]"]' |
+        ans GET_rest_api_2_issue_KAN-1
+    t_run board issue view KAN-1 --jq .sprint
+    t_status 0
+    t_eq "$T_OUT" 'Now, then later'
+}
+
+test_a_sprint_name_at_the_end_of_the_string_is_read() {
+    dc_board
+    printf '[{"id":"customfield_10100","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}]' | ans GET_rest_api_2_field
+    issue_json KAN-1 | t_jq_cmd -c '.fields.customfield_10100 = ["x@2f[id=2,state=ACTIVE,name=Last]"]' |
+        ans GET_rest_api_2_issue_KAN-1
+    t_run board issue view KAN-1 --jq .sprint
+    t_status 0
+    t_eq "$T_OUT" Last
 }
 
 test_edit_into_a_sprint_goes_through_the_agile_api() {
@@ -1592,7 +2080,7 @@ test_md2wiki_emphasis() {
 }
 
 test_md2wiki_inline_code_is_left_alone() {
-    m2w 'run `a *b* _c_ {d}` now' 'run {{a *b* _c_ {d}}} now'
+    m2w 'run `a *b* _c_ {d} e` now' 'run {{a *b* _c_ {d} e}} now'
 }
 
 test_md2wiki_code_block_with_language() {
@@ -1768,6 +2256,233 @@ test_round_trip_keeps_the_common_cases() {
     for text in 'plain строка /start' '**b** *i*' '`code`' '[t](https://x.example)'; do
         t_eq "$(convert 'md2wiki | wiki2md' "$text")" "$text" 'round trip'
     done
+}
+
+test_wiki2md_an_escaped_macro_opens_nothing() {
+    w2m '\{code}
+*b*' '{code}
+**b**'
+    w2m '\{quote}
+*b*' '{quote}
+**b**'
+    w2m '\{noformat} *b* \{panel}' '{noformat} **b** {panel}'
+}
+
+test_wiki2md_a_break_before_a_macro_leaves_the_macro_real() {
+    t_eq "$(convert wiki2md 'a\\{code}
+x
+{code}')" "$(printf 'a  \n```\nx\n```')"
+}
+
+test_wiki2md_a_block_closes_only_on_its_own_delimiter() {
+    t_eq "$(convert wiki2md '{code}
+{noformat}
+{quote}
+*b* _i_ [a|b] {panel}
+{code}
+after')" '```
+{noformat}
+{quote}
+*b* _i_ [a|b] {panel}
+```
+after'
+    t_eq "$(convert wiki2md '{noformat}
+{code}
+{code:java}
+{noformat}')" '```
+{code}
+{code:java}
+```'
+}
+
+test_wiki2md_code_content_is_not_rewritten() {
+    body='{code}
+  two  spaces\\  \{x} &#92; ||a|| h1. x
+{code}'
+    t_eq "$(convert wiki2md "$body")" '```
+  two  spaces\\  \{x} &#92; ||a|| h1. x
+```'
+}
+
+test_wiki2md_a_block_inside_a_line() {
+    t_eq "$(convert wiki2md 'before{code}x{code}after')" 'before
+```
+x
+```
+after'
+}
+
+test_wiki2md_backticks_in_a_block_get_a_longer_fence() {
+    t_eq "$(convert wiki2md '{code}
+```
+{code}')" '````
+```
+````'
+}
+
+test_wiki2md_an_unclosed_block_still_closes() {
+    t_eq "$(convert wiki2md '{code}
+x')" '```
+x
+```'
+}
+
+test_wiki2md_a_macro_inside_a_quote_stays_a_quote() {
+    t_eq "$(convert wiki2md '{quote}
+{code}
+{quote}
+{code}
+{quote}')" '> ```
+> {quote}
+> ```'
+}
+
+test_md2wiki_a_fence_closes_only_on_its_own_delimiter() {
+    t_eq "$(convert md2wiki '~~~
+```
+~~~')" '{code}
+```
+{code}'
+    t_eq "$(convert md2wiki '````
+```
+````')" '{code}
+```
+{code}'
+}
+
+test_md2wiki_a_short_or_filled_line_does_not_close_a_fence() {
+    t_eq "$(convert md2wiki '````
+```
+```` x
+````')" '{code}
+```
+```` x
+{code}'
+}
+
+test_md2wiki_code_content_is_not_rewritten() {
+    t_eq "$(convert md2wiki '```
+**b** [a](b) {c} - x -
+  | t |
+```')" '{code}
+**b** [a](b) {c} - x -
+  | t |
+{code}'
+}
+
+test_md2wiki_a_block_holding_a_code_macro_uses_noformat() {
+    t_eq "$(convert md2wiki '```java
+{code}
+```')" '{noformat}
+{code}
+{noformat}'
+}
+
+test_md2wiki_indented_code_is_a_block() {
+    t_eq "$(convert md2wiki 'text
+
+    **raw** {x}
+    more
+
+after')" 'text
+
+{noformat}
+    **raw** {x}
+    more
+
+{noformat}
+after'
+}
+
+test_md2wiki_an_indented_line_in_a_list_stays_text() {
+    m2w '- a
+
+    still *text*' '* a
+
+still _text_'
+    m2w '- a
+  wrapped' '* a wrapped'
+}
+
+test_round_trip_keeps_what_was_lost_before() {
+    round() {
+        t_eq "$(convert 'md2wiki | wiki2md' "$1")" "$1" "round trip of [$1]"
+    }
+    round 'h1. not a heading'
+    round 'bq. not a quote'
+    round 'a\\b'
+    round '[a|b](https://x.example)'
+    round 'keep -x- and +y+ as they are'
+    round '`x}}y`'
+    round '`x}`'
+    round '`` a`b ``'
+    round 'use `code` and `quote`'
+    round '| a\|b | c |
+| --- | --- |
+| 1\|2 | 3 |'
+}
+
+test_md2wiki_escapes_markup_at_the_start_of_a_line() {
+    m2w 'h1. not a heading' '\h1. not a heading'
+    m2w 'bq. not a quote' '\bq. not a quote'
+    m2w '** not a list' '\** not a list'
+    m2w '|left alone' '\|left alone'
+    m2w 'h1.nospace' 'h1.nospace'
+}
+
+test_md2wiki_a_literal_backslash_is_not_a_line_break() {
+    m2w 'a\\b' 'a&#92;b'
+    got=$(convert md2wiki "end\\\\")
+    t_eq "$got" 'end&#92;' 'an even count is no break'
+}
+
+test_md2wiki_a_pipe_in_a_link_text_stays_in_the_text() {
+    m2w '[a|b](https://x.example)' '[a\|b|https://x.example]'
+}
+
+test_md2wiki_plain_dashes_and_pluses_are_not_markup() {
+    m2w 'keep -x- and +y+' 'keep \-x\- and \+y\+'
+    m2w 'a - b - c' 'a - b - c'
+    m2w 'well-known co-op' 'well-known co-op'
+    m2w '~~gone~~ and -kept-' '-gone- and \-kept\-'
+}
+
+test_md2wiki_a_brace_in_inline_code_cannot_end_it() {
+    m2w '`x}}y`' '{{x&#125;}y}}'
+    m2w '`x}`' '{{x&#125;}}'
+}
+
+test_md2wiki_an_escaped_pipe_stays_in_its_cell() {
+    m2w '| a\|b | c |
+|---|---|' '||a\|b||c||'
+}
+
+test_converters_warn_and_leave_a_line_that_is_too_long() {
+    line=$(awk 'BEGIN { for (i = 0; i < 1600; i++) printf "*a* " }')
+    conv_lib=$(cat "$BOARD_TEST_ROOT/lib/jira/md2wiki.jq" "$BOARD_TEST_ROOT/lib/jira/wiki2md.jq")
+    t_run sh -c 'printf "%s\nshort *a*" "$1" | "$2" -Rrs "$3 wiki2md"' _ "$line" "$(command -v jq)" "$conv_lib"
+    t_status 0
+    t_contains "$T_ERR" 'left unconverted'
+    t_contains "$T_OUT" "$line" 'the long line'
+    t_contains "$T_OUT" 'short **a**'
+}
+
+test_converters_warn_and_leave_a_text_with_too_much_markup() {
+    awk 'BEGIN { for (i = 0; i < 4000; i++) print "*a*" }' >"$T_TMP/heavy"
+    conv_lib=$(cat "$BOARD_TEST_ROOT/lib/jira/md2wiki.jq" "$BOARD_TEST_ROOT/lib/jira/wiki2md.jq")
+    t_jq_cmd -Rrs "$conv_lib wiki2md" <"$T_TMP/heavy" >"$T_TMP/out" 2>"$T_TMP/err"
+    t_contains "$(cat "$T_TMP/err")" 'left unconverted'
+    t_eq "$(grep -c '^\*a\*$' "$T_TMP/out")" 4000 'lines left as they came'
+}
+
+# A wall clock in a test is a blunt tool, so the bound is far above what these take here, about 1s.
+test_a_32k_body_of_short_lines_is_quick() {
+    awk 'BEGIN { for (i = 0; i < 16000; i++) print "x" }' >"$T_TMP/many"
+    conv_lib=$(cat "$BOARD_TEST_ROOT/lib/jira/md2wiki.jq" "$BOARD_TEST_ROOT/lib/jira/wiki2md.jq")
+    start=$(date +%s)
+    t_jq_cmd -Rrs "$conv_lib wiki2md" <"$T_TMP/many" >/dev/null
+    t_jq_cmd -Rrs "$conv_lib md2wiki" <"$T_TMP/many" >/dev/null
+    [ $(($(date +%s) - start)) -lt 8 ] || t_fail "converting 32 KB of short lines took too long"
 }
 
 test_converters_are_within_their_limit() {

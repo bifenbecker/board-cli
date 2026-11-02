@@ -104,9 +104,11 @@ no command for statuses, transitions, priorities or users.
   404, a 400 or an empty first page of a search, call it to tell them apart.
 - A value JQL does not know is not an error on Cloud: `status = "nope"` and `sprint = "x"` answer 200
   with no issues, even on a site with no sprint field.
-- `~` takes Lucene operators. `a(b` finds nothing and `a\(b` finds both words on Cloud; none of the
-  characters tried was refused, but they are escaped for Data Center. JQL strings take the escapes
-  of JSON, so `tojson` writes one.
+- `~` takes Lucene: bare, `NOT x` and `x OR y` are operators, and `a(b` finds nothing. board quotes
+  each word, `"NOT" "x"`, so free text stays text. Quoted words are not yet measured on a live
+  site: `just live jira` proves them. JQL strings take the escapes of JSON, so `tojson` writes one.
+- `PUT /issue` with an `issuetype` the project does not have changed nothing and answered 2xx in
+  review, so a type is checked against `issueTypes` of `/project/<key>` before any write.
 - A transition is `POST /issue/<key>/transitions`. `GET` lists them with `to.name` and
   `to.statusCategory.key`. Team-managed projects allow any status from any status.
 - `POST /issue` needs `project`, `issuetype` and `summary`. `Priority` defaults to `Medium`.
@@ -149,12 +151,28 @@ without it the value is encoded twice and Jira answers `Invalid request payload`
 - `data-binary` reads a file when the value starts with `@`. `board api` therefore takes JSON only.
 - Without `globoff`, `[` and `{` in a URL are curl's own ranges and sets.
 - curl does not follow a redirect unless asked, so the token cannot be carried to another host.
+  `-q` must be its first argument, or `~/.curlrc` is read and a `location` there asks.
+- Once a request may have left, its result is unknown. Only a failure before that is a plain failure:
+  exit codes 5, 6, 7 (proxy, DNS, connect), 35 and 60 (TLS). Everything else on a write is exit 6.
+
+### Wiki text
+
+- jq compiles a regex on every call, near 50 microseconds here, so the cost of a body is its lines of
+  markup. Plain lines take none. A line over 3,000 characters or a text over 3,000 lines of markup
+  goes out as it came, with a warning: 32 KB of the worst text then converts in about a second.
+- `{code}` and `{noformat}` close only on their own delimiter, and nothing inside can be escaped. A
+  block holding `{code}` goes out as `{noformat}`, which has no language.
+- Literal text that wiki would read as markup goes out escaped: `\h1.`, `\-x\-`, `\+x\+`, `a\|b` in a
+  table cell or a link text, and `&#92;` for a literal backslash pair, since `\\` is a line break.
+  `}` that would end `{{...}}` goes out as `&#125;`. These are written to the wiki rules and proved by
+  round trip here; how a live site renders the entities is not yet measured.
 
 ### Trust
 
 The token goes only to a host the user named outside the repository: `server` in
-`JIRA_CONFIG_FILE`, else in `~/.config/.jira/.config.yml`, or a word of `BOARD_JIRA_HOSTS`. The
-host is compared whole, port included, ignoring case. `[board] url` cannot add a host, and neither
+`JIRA_CONFIG_FILE`, else in `~/.config/.jira/.config.yml`, or a word of `BOARD_JIRA_HOSTS`. A
+relative `JIRA_CONFIG_FILE` does not count: it is read from where board runs, which is a repository.
+The host is compared whole, port included, ignoring case. `[board] url` cannot add a host, and neither
 can `[board] config`: that file may give `login`, `auth_type` and `installation`, and its `server`
 is ignored. The user's config gives `auth_type` and `installation` only for its own host, since it
 says nothing about another site; its `login` serves any trusted host. Plain `http` needs `http://`

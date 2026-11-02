@@ -38,7 +38,7 @@ jira_sprint_list() {
     jira_sl_state=''
     [ "$1" = all ] || jira_sl_state=$1
     jira_sl_doc=$(jira_sprints "$jira_sl_state") || return $?
-    printf '%s' "$jira_sl_doc" | _jq -c --arg l "$2" 'if $l == "all" then . else .[:($l | tonumber)] end'
+    printf '%s' "$jira_sl_doc" | board_cut "$2"
 }
 
 jira_sprint_view() {

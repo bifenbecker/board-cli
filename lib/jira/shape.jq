@@ -8,11 +8,16 @@ def jira_user:
 def jira_status:
     {id, name, native: ({new: "todo", indeterminate: "in_progress", done: "done"}[.statusCategory.key // ""])};
 
-def jira_priority:
-    {Highest: "urgent", High: "high", Medium: "medium", Low: "low", Lowest: "low"}[. // ""];
+# Any other name a site gave its priorities is read through [board.priority], else null.
+def jira_priority($cfg):
+    . as $name
+    | if $name == null then null
+      else ({Highest: "urgent", High: "high", Medium: "medium", Low: "low", Lowest: "low"}[$name]
+            // ([($cfg.priority // {}) | to_entries[] | select(.value | tostring | ieq($name)) | .key] | first))
+      end;
 
-def jira_priority_name:
-    {urgent: "Highest", high: "High", medium: "Medium", low: "Low"}[.];
+def jira_priority_name($cfg):
+    ($cfg.priority // {})[.] // {urgent: "Highest", high: "High", medium: "Medium", low: "Low"}[.];
 
 # Read from the side of the issue asked about. A link type outside the model, Cloners on KAN, still
 # relates two issues, and hiding it would hide what 'link remove' can take away.
@@ -25,10 +30,11 @@ def jira_link_type:
 def jira_links:
     map({link: .id, type: jira_link_type, id: (.outwardIssue // .inwardIssue).key});
 
-# Cloud gives objects. Data Center gives a toString: ...Sprint@1f[id=1,state=ACTIVE,name=S 1,...].
+# Cloud gives objects. Data Center gives a toString: ...Sprint@1f[id=1,state=ACTIVE,name=S 1,...]. A
+# name may hold a comma, so it ends at the next key=, not at the next comma.
 def jira_sprint_of:
     map(if type == "object" then {name, state}
-        else {name: (capture("[,\\[]name=(?<v>[^,\\]]*)").v),
+        else {name: (capture("[,\\[]name=(?<v>.*?)(?:,[A-Za-z]+=|\\]$)").v),
               state: (capture("[,\\[]state=(?<v>[^,\\]]*)").v | ascii_downcase)} end)
     | (map(select(.state == "active")) + map(select(.state == "future")) + reverse)[0].name;
 
@@ -41,7 +47,7 @@ def jira_issue($cfg; $base; $sprint):
        status: (if $f.status then ($f.status | jira_status) else null end),
        assignees: [$f.assignee | select(. != null) | jira_user],
        labels: ($f.labels // []),
-       priority: ($f.priority.name | jira_priority),
+       priority: ($f.priority.name | jira_priority($cfg)),
        parent: $f.parent.key,
        subtasks: [($f.subtasks // [])[].key],
        links: (($f.issuelinks // []) | jira_links | map({type, id})),
@@ -55,17 +61,19 @@ def jira_issue($cfg; $base; $sprint):
 
 def jql_str: tostring | tojson;
 
-# Lucene's operators, so free text stays text. Data Center refuses a bare one.
-def lucene: gsub("(?<c>[+\\-&|!(){}\\[\\]^~*?:\\\\/\"])"; "\\\(.c)");
+# Each word quoted: bare, Lucene reads AND, OR, NOT, + and * as operators, and free text must stay
+# text. Inside the quotes only the quote and the backslash mean anything.
+def jira_words:
+    [splits("\\s+") | select(. != "") | "\"" + gsub("(?<c>[\"\\\\])"; "\\\(.c)") + "\""] | join(" ");
 
 def jira_category_clause:
     {open: "statusCategory != done", todo: "statusCategory = new",
      in_progress: "statusCategory = indeterminate", done: "statusCategory = done"}[.];
 
-def jira_priority_clause:
+def jira_priority_clause($cfg):
     if . == "none" then "priority is EMPTY"
-    elif . == "low" then "priority in (\"Low\", \"Lowest\")"
-    else "priority = \(jira_priority_name | jql_str)" end;
+    elif . == "low" and ($cfg.priority.low? == null) then "priority in (\"Low\", \"Lowest\")"
+    else "priority = \(jira_priority_name($cfg) | jql_str)" end;
 
 # Declared statuses move a status between categories, which JQL cannot know: jira_keep decides then.
 def jira_jql($cfg; $project):
@@ -80,16 +88,15 @@ def jira_jql($cfg; $project):
          elif $f.assignee == "none" then ["assignee is EMPTY"]
          else ["assignee = \($f.assignee | jql_str)"] end)
       + ($f.labels | map("labels = \(jql_str)"))
-      + (if $f.priority then [$f.priority | jira_priority_clause] else [] end)
+      + (if $f.priority then [$f.priority | jira_priority_clause($cfg)] else [] end)
       + (if $f.type then ["issuetype = \($f.type | jql_str)"] else [] end)
       + (if $f.sprint == "current" then ["sprint in openSprints()"]
          elif $f.sprint then ["sprint = \($f.sprint | jql_str)"] else [] end)
       + (if $f.milestone then ["fixVersion = \($f.milestone | jql_str)"] else [] end)
       + (if $f.parent then ["parent = \($f.parent | jql_str)"] else [] end)
-      + (if $f.search then
-             ($f.search | lucene | jql_str) as $text
-             | ["(summary ~ \($text) OR description ~ \($text))"]
-         else [] end)
+      + (($f.search // "" | jira_words) as $words
+         | if $words == "" then []
+           else ($words | jql_str) as $text | ["(summary ~ \($text) OR description ~ \($text))"] end)
     | join(" AND ") + " ORDER BY updated DESC";
 
 def jira_keep($f):
@@ -108,18 +115,24 @@ def jira_person($cloud):
     if . == null then null elif $cloud == "1" then {accountId: .} else {name: .} end;
 
 # What an intent sets on the issue itself. $ids holds what its names resolved to.
-def jira_fields($cloud; $ids):
+def jira_fields($cloud; $ids; $cfg):
     (.clear // []) as $clear
     | (if .title then {summary: .title} else {} end)
     + (if .body != null then {description: (.body | md2wiki)} else {} end)
     + (if .priority == "none" or ($clear | index("priority")) then {priority: null}
-       elif .priority then {priority: {name: (.priority | jira_priority_name)}} else {} end)
+       elif .priority then {priority: {name: (.priority | jira_priority_name($cfg))}} else {} end)
     + (if .due then {duedate: .due} elif ($clear | index("due")) then {duedate: null} else {} end)
-    + (if .type then {issuetype: {name: .type}} else {} end)
+    + (if $ids.type then {issuetype: {id: $ids.type}} else {} end)
     + (if $ids.milestone then {fixVersions: [{id: $ids.milestone}]}
        elif ($clear | index("milestone")) then {fixVersions: []} else {} end)
     + (if $ids | has("assignee") then {assignee: ($ids.assignee | jira_person($cloud))} else {} end)
     + (if $ids | has("parent") then {parent: (if $ids.parent then {key: $ids.parent} else null end)} else {} end);
+
+# Where a type sits: Cloud says, and Data Center only tells a subtask from the rest.
+def jira_level: .hierarchyLevel // (if .subtask then -1 else 0 end);
+
+# The project an issue is in, which a key only says while the issue has not moved.
+def jira_issue_project: .fields.project.key // (.key | sub("-[0-9]+$"; ""));
 
 def jira_label_update:
     (.add_labels | map({add: .})) + (.remove_labels | map({remove: .}));

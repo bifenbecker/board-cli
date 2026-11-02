@@ -6,9 +6,13 @@
 JIRA_FIELDS=summary,description,issuetype,status,assignee,labels,priority,parent,subtasks,issuelinks,fixVersions,duedate,reporter,creator,created,updated
 JIRA_CR=$(printf '\r')
 
+# Inherited values would skip the steps they stand for: a set JIRA_TRUSTED is no trust check at all.
+JIRA_READY='' JIRA_TRUSTED='' JIRA_BODY='' JIRA_MOVE_ID='' JIRA_PARENT_EDIT='' JIRA_PARENT_MOVE=''
+
 jira_env() {
     [ -z "${JIRA_READY:-}" ] || return 0
-    JIRA_BODY=''
+    # Steps run inside $(...) and >/dev/null. Fd 4 is the adapter's own stdout, where exit 6 owes the id.
+    exec 4>&1
     JIRA_PROJECT=${BOARD_PROJECT:-}
     JIRA_BOARD=$(board_config_get .target.board)
     if [ -n "${BOARD_URL:-}" ]; then
@@ -74,6 +78,14 @@ jira_site() {
     JIRA_HOST=${JIRA_HOST%%/*}
     JIRA_USER_FILE=${JIRA_CONFIG_FILE:-${HOME:-}/.config/.jira/.config.yml}
     JIRA_USER_SERVER=$(jira_yaml "$JIRA_USER_FILE" server)
+    # A relative path is read from where board runs, which is inside a repository: no vouching.
+    case $JIRA_USER_FILE in
+        /* | [A-Za-z]:[\\/]*) JIRA_USER_NOTE='' ;;
+        *)
+            JIRA_USER_SERVER=''
+            JIRA_USER_NOTE=' (a relative JIRA_CONFIG_FILE does not count)'
+            ;;
+    esac
     JIRA_USER_HOST=$(jira_host_of "$JIRA_USER_SERVER")
     JIRA_LOGIN=$(jira_setting login)
     # A login is who you are, not what the site is, and it goes only to a host already trusted.
@@ -120,7 +132,7 @@ jira_trust() {
         *" $jira_tr_host "*) jira_tr_named=1 ;;
     esac
     [ -n "$jira_tr_named" ] ||
-        board_auth_die "$JIRA_HOST is not a trusted Jira host, so no request was made: add it to BOARD_JIRA_HOSTS (space-separated), or name it as server in $JIRA_USER_FILE"
+        board_auth_die "$JIRA_HOST is not a trusted Jira host, so no request was made: add it to BOARD_JIRA_HOSTS (space-separated), or name it as server in $JIRA_USER_FILE$JIRA_USER_NOTE"
     # Naming a host does not let a repository strip TLS from the way there.
     [ "$JIRA_SCHEME" = https ] || [ -n "$jira_tr_clear" ] ||
         board_auth_die "the token would go to $JIRA_HOST in clear over http, so no request was made: use https, or name http:// in server of $JIRA_USER_FILE"
@@ -152,24 +164,45 @@ jira_request() {
     jira_rq_status=0
     board_http jira_curl_config "$JIRA_BASE$2" || jira_rq_status=$?
     JIRA_BODY=''
+    [ "$jira_rq_status" != 0 ] || return 0
+    # A read wrote nothing, even in a command that goes on to write.
+    [ "$1" != GET ] || BOARD_WRITE=''
+    if [ "$jira_rq_status" = "$BOARD_EXIT_TIMEOUT" ]; then
+        board_timed_out >&4
+        return $?
+    fi
     case $jira_rq_status in
-        0) return 0 ;;
-        "$BOARD_EXIT_TIMEOUT")
-            # A read wrote nothing, even in a command that goes on to write.
-            [ "$1" != GET ] || BOARD_WRITE=''
-            board_timed_out
-            return $?
-            ;;
-        # The request left, and the answer broke off.
-        52 | 55 | 56)
-            if [ "$1" != GET ] && [ -n "${BOARD_WRITE:-}" ]; then
-                board_warn "the connection to $JIRA_HOST broke: the write may have gone through. Check before repeating it"
-                return "$BOARD_EXIT_PARTIAL"
+        # No request can have arrived: a bad URL, no DNS, no connection, no TLS, or no curl.
+        1 | 2 | 3 | 4 | 5 | 6 | 7 | 35 | 58 | 60 | 77 | 126 | 127) ;;
+        *)
+            if [ -n "${BOARD_WRITE:-}" ]; then
+                jira_unknown "the connection to $JIRA_HOST broke (curl exit $jira_rq_status): the write may have gone through. Check before repeating it"
+                return $?
             fi
             ;;
     esac
     board_warn "cannot reach $JIRA_HOST: curl exit $jira_rq_status $(board_err_line)"
     return "$BOARD_EXIT_ERROR"
+}
+
+# A write that may have arrived: exit 6, with the id when it is known.
+jira_unknown() {
+    [ -z "${BOARD_WRITE_ID:-}" ] || printf '%s\n' "$BOARD_WRITE_ID" >&4
+    board_warn "$1"
+    return "$BOARD_EXIT_PARTIAL"
+}
+
+# The answer of a write that went through: prints one field of it, or exit 6. A 2xx that says nothing
+# usable is not a failed write, and the word null is no id. Usage: jira_written <answer> <field>
+jira_written() {
+    jira_wr_value=$(printf '%s' "$1" | _jq -r --arg f "$2" '.[$f] // empty | tostring' 2>/dev/null) || jira_wr_value=''
+    case $jira_wr_value in
+        '' | null | *[!A-Za-z0-9_-]*)
+            jira_unknown "Jira took the write, but its answer gives no $2: check the board before repeating it"
+            return $?
+            ;;
+    esac
+    printf '%s' "$jira_wr_value"
 }
 
 # What Jira said, on one line. An answer that is not JSON is cut, not trusted to be short.
@@ -186,11 +219,18 @@ jira_error_line() {
 jira_login_check() {
     BOARD_WRITE=''
     jira_request GET /rest/api/2/myself || return $?
-    if [ "$BOARD_HTTP_STATUS" != 200 ]; then
-        board_warn "Jira refused the login on $JIRA_HOST (HTTP $BOARD_HTTP_STATUS): check JIRA_API_TOKEN"
-        return "$BOARD_EXIT_AUTH"
-    fi
-    board_record "$(board_rest_key GET /rest/api/2/myself)"
+    case $BOARD_HTTP_STATUS in
+        200)
+            board_record "$(board_rest_key GET /rest/api/2/myself)"
+            return 0
+            ;;
+        401 | 403)
+            board_warn "Jira refused the login on $JIRA_HOST (HTTP $BOARD_HTTP_STATUS): check JIRA_API_TOKEN"
+            return "$BOARD_EXIT_AUTH"
+            ;;
+    esac
+    board_warn "Jira did not say who is logged in on $JIRA_HOST (HTTP $BOARD_HTTP_STATUS)"
+    return "$BOARD_EXIT_ERROR"
 }
 
 # Only here an answer becomes an exit code. Usage: jira_check <path>
@@ -208,8 +248,8 @@ jira_check() {
         404 | 400)
             case $1 in
                 /rest/api/2/myself*)
-                    board_warn "Jira refused the login on $JIRA_HOST (HTTP $jira_ck_http): check JIRA_API_TOKEN"
-                    return "$BOARD_EXIT_AUTH"
+                    board_warn "Jira did not say who is logged in on $JIRA_HOST (HTTP $jira_ck_http)"
+                    return "$BOARD_EXIT_ERROR"
                     ;;
             esac
             jira_login_check || return $?
@@ -220,6 +260,13 @@ jira_check() {
         429)
             board_warn "Jira is limiting the rate of calls (HTTP 429): wait, then retry"
             return "$BOARD_EXIT_ERROR"
+            ;;
+        # A gateway answered, so the write may have reached Jira behind it.
+        502 | 503 | 504)
+            if [ "$JIRA_METHOD" != GET ] && [ -n "${BOARD_WRITE:-}" ]; then
+                jira_unknown "HTTP $jira_ck_http from $JIRA_HOST: the write may have gone through. Check before repeating it"
+                return $?
+            fi
             ;;
     esac
     board_warn "Jira answered HTTP $jira_ck_http: $jira_ck_line"
@@ -238,10 +285,11 @@ jira_call() {
     cat "$BOARD_OUT"
 }
 
-# After a failed step: exit 6 with the id once a write went through, else the step's own status.
+# After a failed step: exit 6 with the id once a write went through, else the step's own status. An
+# exit 6 from the step has given the id already.
 # Usage: step || jira_stop "$?" <id> <message> || return $?
 jira_stop() {
-    [ ! -f "$BOARD_TMP/jira.wrote" ] || board_partial "$2" "$3"
+    [ "$1" = "$BOARD_EXIT_PARTIAL" ] || [ ! -f "$BOARD_TMP/jira.wrote" ] || board_partial "$2" "$3"
     return "$1"
 }
 
@@ -271,15 +319,18 @@ jira_paged_url() {
     esac
 }
 
-# The project: its issue types, and its name. Read once a run.
+# A project: its issue types, and its name. Read once a run. An issue may live outside the project
+# the board declares, and its own project is the one that decides.
+# Usage: jira_project [key]
 jira_project() {
-    if [ -f "$BOARD_TMP/jira.project" ]; then
-        cat "$BOARD_TMP/jira.project"
+    jira_pj_key=${1:-$JIRA_PROJECT}
+    jira_safe "the project" "$jira_pj_key"
+    if [ -f "$BOARD_TMP/jira.project.$jira_pj_key" ]; then
+        cat "$BOARD_TMP/jira.project.$jira_pj_key"
         return 0
     fi
-    jira_require_project
-    jira_pj_doc=$(jira_call GET "/rest/api/2/project/$JIRA_PROJECT") || return $?
-    printf '%s' "$jira_pj_doc" >"$BOARD_TMP/jira.project"
+    jira_pj_doc=$(jira_call GET "/rest/api/2/project/$jira_pj_key") || return $?
+    printf '%s' "$jira_pj_doc" >"$BOARD_TMP/jira.project.$jira_pj_key"
     printf '%s' "$jira_pj_doc"
 }
 

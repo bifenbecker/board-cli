@@ -434,8 +434,9 @@ PLATFORM NOTES
         config names. The token goes only to a host you named outside the repository: the host of
         server in JIRA_CONFIG_FILE or ~/.config/.jira/.config.yml, or a host in BOARD_JIRA_HOSTS
         (space-separated). Anything else is exit 5 with no request made, so a file in a repository
-        cannot send your token somewhere else: [board] url and [board] config never add trust. A
-        host in BOARD_JIRA_HOSTS is reached over https only; http needs http:// in server.
+        cannot send your token somewhere else: [board] url and [board] config never add trust, and
+        a relative JIRA_CONFIG_FILE does not count. A host in BOARD_JIRA_HOSTS is reached over https
+        only; http needs http:// in server.
   GitHub: log in with 'gh auth login'. The project scope is required.
   GitLab: log in with 'glab auth login --hostname <host>'.
   GitHub, GitLab: a host other than github.com or gitlab.com must be in BOARD_TRUSTED_HOSTS, a
