@@ -296,3 +296,13 @@ test_a_comment_of_another_issue_is_not_found() {
     t_status 4
     t_lacks "$(gh_log)" 'DELETE' log
 }
+
+test_write_timeout_in_a_move_prints_the_id() {
+    gh_board
+    gh_issue_answer
+    printf 124 >"$FAKE_OVERRIDE/SetField.status"
+    : >"$FAKE_OVERRIDE/SetField.json"
+    t_run board issue move 11 Done
+    t_status 6
+    t_eq "$T_OUT" 11 stdout
+}
