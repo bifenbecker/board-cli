@@ -45,6 +45,9 @@ board_call() {
     board_call_name=$1
     shift
     board_config_load
+    # Decided here alone: a value inherited from the environment would turn a read into exit 6.
+    BOARD_WRITE=''
+    BOARD_WRITE_ID=''
     case $board_call_name in
         *_create | *_edit | *_move | *_close | *_reopen | *_delete | *_add | *_remove | *_rename) BOARD_WRITE=1 ;;
     esac
