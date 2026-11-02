@@ -3,7 +3,7 @@
 # Iterations need a paid tier. REST says so only as a bare 403 with nothing about a license, the
 # same as a missing permission, so the work item types are asked instead.
 gitlab_require_iterations() {
-    gitlab_ri_types=$(gitlab_query WorkItemTypes -f "path=$GL_PATH") || return $?
+    gitlab_ri_types=$(gitlab_work_item_types) || return $?
     if printf '%s' "$gitlab_ri_types" | _jq -e \
         'any(.data.project.workItemTypes.nodes[].widgetDefinitions[]; .type == "ITERATION")' >/dev/null; then
         return 0

@@ -12,11 +12,10 @@ gitlab_milestone_body() {
 }
 
 gitlab_milestone_page() {
-    gitlab_mp_page=${1:-1}
-    gitlab_mp_doc=$(gitlab_rest GET "projects/$GL_ID/milestones?per_page=100$GL_MILESTONE_STATE&page=$gitlab_mp_page") || return $?
-    printf '%s' "$gitlab_mp_doc" | _jq -c --argjson page "$gitlab_mp_page" '
+    gitlab_mp_doc=$(gitlab_rest_page "projects/$GL_ID/milestones?per_page=100$GL_MILESTONE_STATE&page=${1:-1}") || return $?
+    printf '%s' "$gitlab_mp_doc" | _jq -c --arg next "$(gitlab_next_page)" '
         '"$BOARD_LIB"'
-        {has_next: (length == 100), end_cursor: ($page + 1 | tostring), nodes: map(gl_milestone)}'
+        {has_next: ($next != ""), end_cursor: $next, nodes: map(gl_milestone)}'
 }
 
 gitlab_milestone_list() {
@@ -36,12 +35,14 @@ gitlab_milestone_view() {
 
 gitlab_milestone_create() {
     gitlab_mc_doc=$(gitlab_milestone_body | gitlab_rest_body POST "projects/$GL_ID/milestones") || return $?
+    gitlab_has_id "$gitlab_mc_doc" milestone || return $?
     printf '%s' "$gitlab_mc_doc" | _jq -c ''"$BOARD_LIB"' gl_milestone'
 }
 
 gitlab_milestone_edit() {
     board_require_int '<id>' "$1"
     gitlab_me_doc=$(gitlab_milestone_body | gitlab_rest_body PUT "projects/$GL_ID/milestones/$1") || return $?
+    gitlab_has_id "$gitlab_me_doc" milestone || return $?
     printf '%s' "$gitlab_me_doc" | _jq -c ''"$BOARD_LIB"' gl_milestone'
 }
 

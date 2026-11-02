@@ -9,16 +9,6 @@ gitlab_status_list() {
         . as $cfg | [gl_status_names($cfg)[] | {name: .} | make_status($cfg)]'
 }
 
-# A declared status under its declared spelling: labels are case-sensitive on GitLab.
-gitlab_status_spelling() {
-    gitlab_ss_hit=$(gitlab_status_find "$1")
-    if [ -n "$gitlab_ss_hit" ]; then
-        printf '%s' "$gitlab_ss_hit" | _jq -r .name
-    else
-        printf '%s' "$1"
-    fi
-}
-
 gitlab_status_add() {
     board_provider_load label
     gitlab_sa_labels=$(gitlab_labels_raw) || return $?
@@ -27,6 +17,7 @@ gitlab_status_add() {
     if [ -z "$gitlab_sa_label" ]; then
         gitlab_sa_label=$(_jq -nc --arg n "$1" '{name: $n, color: "#6699cc"}' |
             gitlab_rest_body POST "projects/$GL_ID/labels") || return $?
+        gitlab_has_id "$gitlab_sa_label" label || return $?
         GL_WROTE=1
     fi
     gitlab_sa_id=$(printf '%s' "$gitlab_sa_label" | _jq -r .id)
@@ -44,13 +35,15 @@ gitlab_status_add() {
 }
 
 gitlab_status_rename() {
-    gitlab_sr_old=$(gitlab_status_spelling "$1")
+    gitlab_sr_old=$(gitlab_label_real "$1") || return $?
     gitlab_sr_doc=$(_jq -nc --arg n "$2" '{new_name: $n}' |
         gitlab_rest_body PUT "projects/$GL_ID/labels/$(board_urlencode "$gitlab_sr_old")") || return $?
+    gitlab_has_id "$gitlab_sr_doc" label || return $?
     printf '%s' "$gitlab_sr_doc" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" --arg old "$gitlab_sr_old" '
         '"$BOARD_LIB"' {id, name, native: category_of($cfg; $old; null)} | make_status($cfg)'
 }
 
 gitlab_status_delete() {
-    gitlab_rest DELETE "projects/$GL_ID/labels/$(board_urlencode "$(gitlab_status_spelling "$1")")" >/dev/null
+    gitlab_sd_name=$(gitlab_label_real "$1") || return $?
+    gitlab_rest DELETE "projects/$GL_ID/labels/$(board_urlencode "$gitlab_sd_name")" >/dev/null
 }

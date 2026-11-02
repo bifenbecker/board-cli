@@ -5,7 +5,10 @@ query IssueHierarchy($path: ID!, $iid: String!) {
         widgets {
           ... on WorkItemWidgetHierarchy {
             parent { iid }
-            children(first: 100) { nodes { iid } }
+            children(first: 100) {
+              nodes { iid }
+              pageInfo { hasNextPage }
+            }
           }
         }
       }

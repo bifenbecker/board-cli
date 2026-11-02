@@ -28,6 +28,7 @@ EOF
     export FAKE_OVERRIDE
     mkdir -p "$FAKE_OVERRIDE"
     gl_answer GET_user '{"id":5,"username":"me","name":"Me"}'
+    gl_answer GET_projects_a_2Fb_labels '[]'
 }
 
 gl_answer() {
@@ -66,7 +67,24 @@ gl_workflow() {
 }
 
 gl_free_types() {
-    gl_answer WorkItemTypes '{"data":{"project":{"workItemTypes":{"nodes":[{"id":"gid://gitlab/WorkItems::Type/1","name":"Issue","widgetDefinitions":[{"type":"ASSIGNEES"}]},{"id":"gid://gitlab/WorkItems::Type/5","name":"Task","widgetDefinitions":[{"type":"HIERARCHY"}]}]}}}}'
+    gl_answer WorkItemTypes '{"data":{"project":{"workItemTypes":{"nodes":[{"id":"gid://gitlab/WorkItems::Type/1","name":"Issue","widgetDefinitions":[{"type":"ASSIGNEES"},{"type":"HIERARCHY","allowedParentTypes":{"nodes":[]}}]},{"id":"gid://gitlab/WorkItems::Type/5","name":"Task","widgetDefinitions":[{"type":"HIERARCHY","allowedParentTypes":{"nodes":[{"name":"Issue"},{"name":"Incident"}]}}]}]}}}}'
+}
+
+# Usage: gl_parent <type>  — issue 9, which the tests hang things under.
+gl_parent() {
+    gl_answer GET_projects_a_2Fb_issues_9 "{\"id\":900,\"iid\":9,\"type\":\"$1\"}"
+}
+
+# Usage: gl_labels <name>...  — the labels the project has.
+gl_labels() {
+    gl_labels_doc=$(printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(. != "") | {name: .})')
+    gl_answer GET_projects_a_2Fb_labels "$gl_labels_doc"
+}
+
+# The filter of shape.jq, for what needs no adapter around it.
+gl_jq() {
+    gl_jq_lib=$(cat "$BOARD_TEST_ROOT/lib/jq/common.jq" "$BOARD_TEST_ROOT/lib/gitlab/shape.jq")
+    t_jq_cmd "$1" "$gl_jq_lib $2"
 }
 
 # --- what an answer means ----------------------------------------------------------------
@@ -193,6 +211,7 @@ test_a_write_that_times_out_is_partial() {
     printf 124 >"$FAKE_OVERRIDE/PUT_projects_a_2Fb_issues_1.status"
     t_run board issue move 1 done
     t_status 6
+    t_eq "$T_OUT" 1 stdout
 }
 
 test_every_call_names_the_host() {
@@ -388,6 +407,14 @@ test_an_undeclared_priority_is_not_supported() {
 
 # --- list --------------------------------------------------------------------------------
 
+# Usage: gl_headed <key> <next page, empty on the last> <issues>  — a page as glab api -i prints it.
+gl_headed() {
+    {
+        printf 'HTTP/2.0 200 OK\nX-Next-Page: %s\nX-Page: 1\n\n' "$2"
+        jq -cn --argjson i "$(gl_issue_json '[]')" --argjson n "$3" '[range($n) | $i]'
+    } >"$FAKE_OVERRIDE/$1.json"
+}
+
 gl_list() {
     printf '[%s,%s,%s]' "$(gl_issue_json '["done"]' closed)" "$(gl_issue_json '["wontfix"]' closed)" \
         "$(gl_issue_json '[]' closed)" >"$FAKE_OVERRIDE/GET_projects_a_2Fb_issues.json"
@@ -439,6 +466,7 @@ test_category_canceled_filters_on_this_side() {
 
 test_status_filter_asks_for_the_declared_label() {
     gitlab_board
+    gl_labels alpha
     gl_answer GET_projects_a_2Fb_issues '[]'
     t_run board issue list --status ALPHA --json
     t_status 0
@@ -448,7 +476,7 @@ test_status_filter_asks_for_the_declared_label() {
 
 test_a_full_page_asks_for_the_next_one() {
     gitlab_board
-    jq -cn --argjson i "$(gl_issue_json '[]')" '[range(100) | $i]' >"$FAKE_OVERRIDE/GET_projects_a_2Fb_issues.1.json"
+    gl_headed GET_projects_a_2Fb_issues.1 2 100
     gl_answer GET_projects_a_2Fb_issues.2 "[$(gl_issue_json '[]')]"
     t_run board issue list --limit all --json
     t_status 0
@@ -533,7 +561,7 @@ test_create_with_a_parent_makes_a_task() {
     gl_free_types
     gl_issue '["zeta"]'
     gl_answer POST_projects_a_2Fb_issues "$(gl_issue_json '["zeta"]')"
-    gl_answer GET_projects_a_2Fb_issues_9 '{"id":900,"iid":9}'
+    gl_parent ISSUE
     gl_answer SetParent '{"data":{"workItemUpdate":{"errors":[]}}}'
     t_run board issue create --title t --parent 9 --json
     t_status 0
@@ -552,10 +580,12 @@ test_create_with_a_parent_that_is_missing_writes_nothing() {
 
 test_create_of_an_issue_under_a_parent_is_not_supported() {
     gitlab_board
+    gl_free_types
+    gl_parent ISSUE
     t_run board issue create --title t --parent 9 --type Issue
     t_status 3
-    t_contains "$T_ERR" 'only a Task'
-    [ ! -s "$FAKE_LOG" ] || t_fail "the board was reached: $(cat "$FAKE_LOG")"
+    t_contains "$T_ERR" 'type Issue cannot have a parent'
+    t_lacks "$(cat "$FAKE_LOG")" POST
 }
 
 test_a_parent_refused_after_create_is_partial() {
@@ -563,7 +593,7 @@ test_a_parent_refused_after_create_is_partial() {
     gl_free_types
     gl_issue '["zeta"]'
     gl_answer POST_projects_a_2Fb_issues "$(gl_issue_json '["zeta"]')"
-    gl_answer GET_projects_a_2Fb_issues_9 '{"id":900,"iid":9}'
+    gl_parent ISSUE
     gl_answer SetParent '{"data":{"workItemUpdate":{"errors":["not allowed"]}}}'
     t_run board issue create --title t --parent 9
     t_status 6
@@ -587,7 +617,7 @@ test_a_parent_beats_the_default_type() {
     printf '\n[board.defaults]\ntype = "Issue"\n' >>"$WORKFLOW_FILE"
     gl_issue '["zeta"]'
     gl_answer POST_projects_a_2Fb_issues "$(gl_issue_json '["zeta"]')"
-    gl_answer GET_projects_a_2Fb_issues_9 '{"id":900,"iid":9}'
+    gl_parent ISSUE
     gl_answer SetParent '{"data":{"workItemUpdate":{"errors":[]}}}'
     t_run board issue create --title t --parent 9
     t_status 0
@@ -637,7 +667,7 @@ test_a_parent_refused_after_a_conversion_is_partial() {
     gitlab_board
     gl_free_types
     gl_issue '[]'
-    gl_answer GET_projects_a_2Fb_issues_9 '{"id":900,"iid":9}'
+    gl_parent ISSUE
     gl_answer ConvertType '{"data":{"workItemConvert":{"errors":[]}}}'
     gl_answer SetParent '{"data":{"workItemUpdate":{"errors":["not allowed"]}}}'
     t_run board issue edit 1 --type Task --parent 9
@@ -647,13 +677,26 @@ test_a_parent_refused_after_a_conversion_is_partial() {
 
 test_an_issue_that_cannot_be_a_child_is_not_supported() {
     gitlab_board
+    gl_free_types
     gl_issue '[]'
-    gl_answer GET_projects_a_2Fb_issues_9 '{"id":900,"iid":9}'
-    gl_answer SetParent '{"data":{"workItemUpdate":{"errors":["#5 cannot be added: it'"'"'s not allowed to add this type of parent item"]}}}'
+    gl_parent ISSUE
     t_run board issue edit 1 --parent 9 --title x
     t_status 3
-    t_contains "$T_ERR" 'not allowed to add this type'
+    t_contains "$T_ERR" 'pass --type Task'
     t_lacks "$(cat "$FAKE_LOG")" PUT
+    t_lacks "$(cat "$FAKE_LOG.stdin" 2>/dev/null)" mutation
+}
+
+test_a_refusal_the_rule_did_not_foresee_is_not_supported_too() {
+    gitlab_board
+    gl_free_types
+    gl_issue '[]'
+    gl_answer GET_projects_a_2Fb_issues_1 "$(gl_issue_json '[]' | sed 's/"ISSUE"/"TASK"/')"
+    gl_parent ISSUE
+    gl_answer SetParent '{"data":{"workItemUpdate":{"errors":["reached maximum depth"]}}}'
+    t_run board issue edit 1 --parent 9
+    t_status 3
+    t_contains "$T_ERR" 'maximum depth'
 }
 
 test_clear_parent_sends_null() {
@@ -687,8 +730,10 @@ test_an_unknown_type_lists_the_valid_ones() {
 
 test_a_failed_put_after_a_parent_is_partial() {
     gitlab_board
+    gl_free_types
     gl_issue '[]'
-    gl_answer GET_projects_a_2Fb_issues_9 '{"id":900,"iid":9}'
+    gl_answer GET_projects_a_2Fb_issues_1 "$(gl_issue_json '[]' | sed 's/"ISSUE"/"TASK"/')"
+    gl_parent ISSUE
     gl_answer SetParent '{"data":{"workItemUpdate":{"errors":[]}}}'
     gl_refuse PUT_projects_a_2Fb_issues_1 '{"message":"500"}' 'glab: 500 (HTTP 500)'
     t_run board issue edit 1 --parent 9 --title x
@@ -888,6 +933,7 @@ test_a_board_that_cannot_be_read_is_not_partial_when_nothing_was_written() {
 
 test_status_rename_keeps_the_category() {
     gitlab_board
+    gl_labels alpha
     gl_answer PUT_projects_a_2Fb_labels_alpha '{"id":11,"name":"beta"}'
     t_run board status rename ALPHA beta --json
     t_status 0
@@ -1062,6 +1108,595 @@ test_init_refuses_userinfo_in_the_url() {
     t_run board init --url https://gitlab.com@evil.example/group/proj --kind gitlab --dry-run
     t_status 2
     [ ! -s "$FAKE_LOG" ] || t_fail "the board was reached: $(cat "$FAKE_LOG")"
+}
+
+# --- findings of the adversarial review, one section each ---------------------------------
+
+# 1. Quick actions.
+
+test_escaping_round_trips_exactly() {
+    got=$(printf '%s' '["/close", "  /label x", "   /c", "    /four", "\\/close", "\\\\/close", "  \\/x", "a /b", "/a\n/b\n\ntext", "/close\r", "кириллица /x", "/", ""]' |
+        gl_jq -c 'map(. as $o | gl_escape | gl_unescape == $o) | all')
+    t_eq "$got" true 'text comes back as written'
+}
+
+test_escaping_touches_only_a_line_that_starts_with_a_slash() {
+    got=$(printf '%s' '"/close\n   /a\n    /b\n\\/c\nd /e"' | gl_jq -c 'gl_escape')
+    t_eq "$got" '"\\/close\n   \\/a\n    /b\n\\\\/c\nd /e"' escaped
+}
+
+test_create_does_not_run_a_quick_action() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    gl_answer POST_projects_a_2Fb_issues "$(gl_issue_json '["zeta"]')"
+    t_run board issue create --title t --body '/close'
+    t_status 0
+    t_jq "$(gl_sent)" .description '"\\/close"'
+}
+
+test_edit_does_not_run_a_quick_action() {
+    gitlab_board
+    gl_issue '[]'
+    t_run board issue edit 1 --body 'first
+/close'
+    t_status 0
+    t_jq "$(gl_sent)" .description '"first\n\\/close"'
+}
+
+test_comment_add_does_not_run_a_quick_action() {
+    gitlab_board
+    gl_answer POST_projects_a_2Fb_issues_1_notes '{"id":7,"body":"\\/close","noteable_iid":1,"author":null}'
+    t_run board issue comment add 1 --body '/close' --json
+    t_status 0
+    t_jq "$(gl_sent)" .body '"\\/close"'
+    t_jq "$T_OUT" .body '"/close"'
+}
+
+test_comment_edit_does_not_run_a_quick_action() {
+    gitlab_board
+    gl_answer PUT_projects_a_2Fb_issues_1_notes_7 '{"id":7,"body":"\\/close","noteable_iid":1,"author":null}'
+    t_run board issue comment edit 1 7 --body '/close' --json
+    t_status 0
+    t_jq "$(gl_sent)" .body '"\\/close"'
+    t_jq "$T_OUT" .id '"7"'
+}
+
+test_reading_removes_the_escape() {
+    gitlab_board
+    gl_issue '[]'
+    gl_answer GET_projects_a_2Fb_issues_1 "$(gl_issue_json '[]' | sed 's#"description":null#"description":"\\\\/close\\ntext"#')"
+    t_run board issue view 1 --json
+    t_jq "$T_OUT" .description '"/close\ntext"'
+}
+
+test_comments_read_without_the_escape() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_issues_1_notes '[{"id":2,"system":false,"body":"\\/close","author":null,"noteable_iid":1}]'
+    t_run board issue comment list 1 --json
+    t_jq "$T_OUT" '.[0].body' '"/close"'
+}
+
+test_a_comment_answer_with_no_id_is_a_failure() {
+    gitlab_board
+    gl_answer POST_projects_a_2Fb_issues_1_notes '{"commands_changes":{"state_event":"close"}}'
+    t_run board issue comment add 1 --body x --json
+    t_status 1
+    t_lacks "$T_OUT" null
+    gl_answer PUT_projects_a_2Fb_issues_1_notes_7 '{}'
+    t_run board issue comment edit 1 7 --body x --json
+    t_status 1
+    t_lacks "$T_OUT" null
+}
+
+test_an_issue_answer_with_no_id_is_a_failure() {
+    gitlab_board
+    gl_answer POST_projects_a_2Fb_issues '{"commands_changes":{}}'
+    t_run board issue create --title t
+    t_status 1
+    t_lacks "$T_OUT" null
+}
+
+# 2. A closed issue is done or canceled.
+
+test_closed_with_an_open_label_reads_as_done_and_keeps_the_name() {
+    gitlab_board
+    gl_issue '["alpha"]' closed
+    t_run board issue view 1 --json
+    t_jq "$T_OUT" .status '{"name":"alpha","category":"done"}'
+}
+
+test_closed_with_a_canceled_label_stays_canceled() {
+    gitlab_board
+    gl_issue '["wontfix"]' closed
+    t_run board issue view 1 --json
+    t_jq "$T_OUT" .status '{"name":"wontfix","category":"canceled"}'
+}
+
+test_list_and_view_agree_on_a_closed_issue() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["alpha"]' closed)]"
+    t_run board issue list --category done --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" 'state=all'
+    t_jq "$T_OUT" 'map(.status)' '[{"name":"alpha","category":"done"}]'
+    t_run board issue list --category in_progress --json
+    t_eq "$T_OUT" '[]' 'in_progress'
+    t_run board issue list --category open --json
+    t_eq "$T_OUT" '[]' 'open'
+}
+
+test_status_filter_reaches_a_closed_issue() {
+    gitlab_board
+    gl_labels alpha
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["alpha"]' closed)]"
+    t_run board issue list --status alpha --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" 'state=all'
+    t_jq "$T_OUT" 'length' 1
+}
+
+# 3. A declared name in another case.
+
+test_move_writes_the_project_spelling() {
+    gitlab_board
+    gl_labels ZETA ALPHA Done WontFix
+    gl_issue '["ZETA"]'
+    t_run board issue move 1 zeta --json
+    t_status 0
+    t_jq "$(gl_sent)" . '{"add_labels":"ZETA","remove_labels":"ALPHA,Done,WontFix","state_event":"reopen"}'
+    t_jq "$T_OUT" .status '{"name":"ZETA","category":"todo"}'
+}
+
+test_a_declared_status_that_does_not_exist_keeps_its_declared_spelling() {
+    gitlab_board
+    gl_labels ZETA
+    gl_issue '["alpha"]'
+    t_run board issue move 1 alpha --json
+    t_status 0
+    t_jq "$(gl_sent)" .add_labels '"alpha"'
+}
+
+test_a_move_clears_a_second_spelling_of_a_status() {
+    gitlab_board
+    gl_labels alpha Alpha zeta
+    gl_issue '["zeta"]'
+    t_run board issue move 1 zeta --json
+    t_status 0
+    t_contains "$(gl_sent)" 'alpha,done,wontfix,Alpha'
+}
+
+test_priority_writes_the_project_spelling() {
+    gitlab_board
+    gl_labels P::HIGH P::LOW
+    gl_issue '["P::HIGH"]'
+    t_run board issue edit 1 --priority high --json
+    t_status 0
+    t_jq "$(gl_sent)" . '{"add_labels":"P::HIGH","remove_labels":"P::LOW"}'
+    t_jq "$T_OUT" .priority '"high"'
+}
+
+test_status_filter_asks_for_the_project_spelling() {
+    gitlab_board
+    gl_labels ALPHA
+    gl_answer GET_projects_a_2Fb_issues '[]'
+    t_run board issue list --status alpha --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" 'labels=ALPHA'
+}
+
+test_doctor_reports_a_declared_label_that_does_not_exist() {
+    gitlab_board
+    gl_labels ZETA alpha
+    gl_answer GET_projects_a_2Fb_boards_7 '{"id":7,"name":"B","lists":[]}'
+    t_run board doctor --json
+    t_status 0
+    t_contains "$T_OUT" 'status \"done\" has no label'
+    t_contains "$T_OUT" 'label \"zeta\" is spelled \"ZETA\"'
+    t_contains "$T_OUT" 'priority label \"p::high\" does not exist'
+}
+
+# 4. Keywords stay out of the server query.
+
+test_label_any_is_a_name() {
+    gitlab_board
+    gl_labels Any
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["Any"]'),$(gl_issue_json '["bug"]')]"
+    t_run board issue list --label Any --json
+    t_status 0
+    t_lacks "$(cat "$FAKE_LOG")" 'labels='
+    t_jq "$T_OUT" 'map(.labels)' '[["Any"]]'
+}
+
+test_label_none_is_a_name() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '[]')]"
+    t_run board issue list --label None --json
+    t_status 0
+    t_lacks "$(cat "$FAKE_LOG")" 'labels='
+    t_eq "$T_OUT" '[]'
+}
+
+test_a_comma_in_a_label_is_not_two_labels() {
+    gitlab_board
+    gl_labels a b
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["a","b"]')]"
+    t_run board issue list --label a,b --json
+    t_status 0
+    t_lacks "$(cat "$FAKE_LOG")" 'labels='
+    t_eq "$T_OUT" '[]'
+}
+
+test_status_any_is_a_name() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["zeta"]')]"
+    t_run board issue list --status Any --json
+    t_status 0
+    t_lacks "$(cat "$FAKE_LOG")" 'labels='
+    t_eq "$T_OUT" '[]'
+}
+
+test_milestone_keywords_are_names() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_milestones '[{"id":1,"title":"Any"},{"id":2,"title":"None"}]'
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '[]')]"
+    t_run board issue list --milestone Any --json
+    t_status 0
+    t_eq "$T_OUT" '[]' Any
+    t_run board issue list --milestone None --json
+    t_status 0
+    t_eq "$T_OUT" '[]' None
+    t_lacks "$(cat "$FAKE_LOG")" 'milestone=Any'
+    t_lacks "$(cat "$FAKE_LOG")" 'milestone=None'
+}
+
+# 5. Labels and milestones in another case.
+
+test_label_filter_ignores_case() {
+    gitlab_board
+    gl_labels Bug
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["Bug"]')]"
+    t_run board issue list --label BUG --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" 'labels=Bug'
+    t_jq "$T_OUT" length 1
+}
+
+test_add_label_writes_the_project_spelling() {
+    gitlab_board
+    gl_labels Bug
+    gl_issue '[]'
+    t_run board issue edit 1 --add-label BUG --json
+    t_status 0
+    t_jq "$(gl_sent)" . '{"add_labels":"Bug"}'
+}
+
+test_remove_label_ignores_case() {
+    gitlab_board
+    gl_labels Bug BUG
+    gl_issue '[]'
+    t_run board issue edit 1 --remove-label bug --json
+    t_status 0
+    t_jq "$(gl_sent)" . '{"remove_labels":"Bug,BUG"}'
+}
+
+test_create_label_writes_the_project_spelling() {
+    gitlab_board
+    gl_labels Bug
+    gl_issue '["zeta"]'
+    gl_answer POST_projects_a_2Fb_issues "$(gl_issue_json '["zeta"]')"
+    t_run board issue create --title t --label BUG
+    t_status 0
+    t_jq "$(gl_sent)" .labels '"Bug,zeta"'
+}
+
+test_label_edit_ignores_case() {
+    gitlab_board
+    gl_labels Bug
+    gl_answer PUT_projects_a_2Fb_labels_Bug '{"id":1,"name":"Bug","color":"#000000"}'
+    t_run board label edit BUG --description d --json
+    t_status 0
+    t_jq "$T_OUT" .name '"Bug"'
+}
+
+test_label_delete_ignores_case() {
+    gitlab_board
+    gl_labels Bug
+    gl_answer DELETE_projects_a_2Fb_labels_Bug ''
+    t_run board label delete BUG --yes
+    t_status 0
+}
+
+test_status_rename_and_delete_ignore_the_case_of_the_label() {
+    gitlab_board
+    gl_labels ALPHA
+    gl_answer PUT_projects_a_2Fb_labels_ALPHA '{"id":11,"name":"beta"}'
+    gl_answer DELETE_projects_a_2Fb_labels_ALPHA ''
+    t_run board status rename alpha beta --json
+    t_status 0
+    t_jq "$T_OUT" .category '"in_progress"'
+    t_run board status delete alpha --yes
+    t_status 0
+}
+
+test_milestone_filter_ignores_case() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_milestones '[{"id":1,"title":"V1"}]'
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '[]' | sed 's/"milestone":null/"milestone":{"title":"V1"}/'),$(gl_issue_json '[]')]"
+    t_run board issue list --milestone v1 --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" 'milestone=V1'
+    t_jq "$T_OUT" 'map(.milestone)' '["V1"]'
+}
+
+# 6. The value as read.
+
+test_status_filter_decides_on_the_status_as_read() {
+    gitlab_board
+    gl_labels done zeta
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["done","zeta"]')]"
+    t_run board issue list --status done --json
+    t_status 0
+    t_eq "$T_OUT" '[]' 'it reads as zeta'
+    t_run board issue list --status zeta --json
+    t_jq "$T_OUT" 'length' 1
+}
+
+test_priority_filter_decides_on_the_priority_as_read() {
+    gitlab_board
+    gl_labels p::high p::low
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '["p::low","p::high"]')]"
+    t_run board issue list --priority low --json
+    t_status 0
+    t_eq "$T_OUT" '[]' 'it reads as high'
+    t_run board issue list --priority high --json
+    t_jq "$T_OUT" 'length' 1
+}
+
+test_a_priority_clash_warns() {
+    gitlab_board
+    gl_issue '["p::low","p::high"]'
+    t_run board issue view 1 --json
+    t_status 0
+    t_jq "$T_OUT" .priority '"high"'
+    t_contains "$T_ERR" 'priorities high and low'
+}
+
+# 7. A label that names a declared status or priority.
+
+test_add_label_naming_a_status_is_a_move() {
+    gitlab_board
+    gl_issue '["done"]' closed
+    t_run board issue edit 1 --add-label DONE --json
+    t_status 0
+    t_jq "$(gl_sent)" . '{"add_labels":"done","remove_labels":"zeta,alpha,wontfix","state_event":"close"}'
+}
+
+test_add_label_naming_a_priority_is_a_priority() {
+    gitlab_board
+    gl_issue '[]'
+    t_run board issue edit 1 --add-label p::low --json
+    t_status 0
+    t_jq "$(gl_sent)" . '{"add_labels":"p::low","remove_labels":"p::high"}'
+}
+
+test_create_label_naming_a_status_replaces_the_default() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    gl_answer POST_projects_a_2Fb_issues "$(gl_issue_json '["alpha"]')"
+    t_run board issue create --title t --label alpha --label bug
+    t_status 0
+    t_jq "$(gl_sent)" .labels '"bug,alpha"'
+}
+
+test_status_flag_wins_over_a_label_naming_a_status() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue edit 1 --status alpha --add-label zeta --json
+    t_status 0
+    t_jq "$(gl_sent)" .add_labels '"alpha"'
+}
+
+# 8. The parent rule comes before the first write.
+
+test_create_under_a_task_writes_nothing() {
+    gitlab_board
+    gl_free_types
+    gl_parent TASK
+    t_run board issue create --title t --parent 9
+    t_status 3
+    t_contains "$T_ERR" 'can only have a parent of type Issue, Incident, not Task'
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+test_a_task_can_sit_under_an_incident() {
+    gitlab_board
+    gl_free_types
+    gl_issue '["zeta"]'
+    gl_answer POST_projects_a_2Fb_issues "$(gl_issue_json '["zeta"]')"
+    gl_parent INCIDENT
+    gl_answer SetParent '{"data":{"workItemUpdate":{"errors":[]}}}'
+    t_run board issue create --title t --parent 9
+    t_status 0
+}
+
+test_convert_and_a_refused_parent_write_nothing() {
+    gitlab_board
+    gl_free_types
+    gl_issue '[]'
+    gl_parent TASK
+    t_run board issue edit 1 --type Task --parent 9
+    t_status 3
+    t_eq "$T_OUT" '' stdout
+    t_lacks "$(cat "$FAKE_LOG.stdin" 2>/dev/null)" mutation
+}
+
+# 9. BOARD_WRITE follows each call.
+
+test_a_read_that_times_out_in_a_write_command_is_a_failure() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_issues_1 ''
+    printf 124 >"$FAKE_OVERRIDE/GET_projects_a_2Fb_issues_1.status"
+    t_run board issue edit 1 --title x
+    t_status 1
+    t_eq "$T_OUT" '' stdout
+}
+
+test_labels_that_time_out_before_a_move_are_a_failure() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_labels ''
+    printf 124 >"$FAKE_OVERRIDE/GET_projects_a_2Fb_labels.status"
+    t_run board issue move 1 done
+    t_status 1
+}
+
+test_a_query_that_times_out_after_a_write_is_partial_with_the_id() {
+    gitlab_board
+    gl_issue '["done"]' closed
+    gl_answer IssueHierarchy ''
+    printf 124 >"$FAKE_OVERRIDE/IssueHierarchy.status"
+    t_run board issue move 1 done
+    t_status 6
+    t_eq "$T_OUT" 1 stdout
+}
+
+test_a_mutation_that_times_out_prints_the_id() {
+    gitlab_board
+    gl_issue '[]'
+    gl_answer SetParent ''
+    printf 124 >"$FAKE_OVERRIDE/SetParent.status"
+    t_run board issue edit 1 --clear parent
+    t_status 6
+    t_eq "$T_OUT" 1 stdout
+}
+
+# 10. Every board.
+
+test_board_list_reads_every_page() {
+    gitlab_board
+    jq -cn '[range(100) | {id: ., name: "b"}]' >"$FAKE_OVERRIDE/GET_projects_a_2Fb_boards.1.json"
+    gl_answer GET_projects_a_2Fb_boards.2 '[{"id":100,"name":"last"}]'
+    t_run board list --json
+    t_status 0
+    t_jq "$T_OUT" length 101
+}
+
+# 11. Subtasks past the first page.
+
+test_more_subtasks_than_a_page_warns() {
+    gitlab_board
+    gl_issue '[]'
+    gl_answer IssueHierarchy '{"data":{"project":{"workItems":{"nodes":[{"widgets":[{"parent":null,"children":{"nodes":[{"iid":"2"}],"pageInfo":{"hasNextPage":true}}}]}]}}}}'
+    t_run board issue view 1 --json
+    t_status 0
+    t_contains "$T_ERR" 'more than 100 subtasks'
+}
+
+test_a_parent_filter_warns_too() {
+    gitlab_board
+    gl_answer GET_projects_a_2Fb_issues '[]'
+    gl_answer IssueHierarchy '{"data":{"project":{"workItems":{"nodes":[{"widgets":[{"parent":null,"children":{"nodes":[{"iid":"2"}],"pageInfo":{"hasNextPage":true}}}]}]}}}}'
+    t_run board issue list --parent 1 --json
+    t_status 0
+    t_contains "$T_ERR" 'more than 100 subtasks'
+}
+
+test_a_short_list_of_subtasks_does_not_warn() {
+    gitlab_board
+    gl_issue '[]'
+    gl_answer IssueHierarchy '{"data":{"project":{"workItems":{"nodes":[{"widgets":[{"parent":null,"children":{"nodes":[],"pageInfo":{"hasNextPage":false}}}]}]}}}}'
+    t_run board issue view 1 --json
+    t_status 0
+    t_lacks "$T_ERR" subtasks
+}
+
+# 12. An unknown type in a list.
+
+test_list_with_an_unknown_type_is_wrong_usage() {
+    gitlab_board
+    gl_free_types
+    t_run board issue list --type foo
+    t_status 2
+    t_contains "$T_ERR" 'Issue, Task'
+    t_lacks "$(cat "$FAKE_LOG")" '/issues'
+}
+
+test_list_type_ignores_case() {
+    gitlab_board
+    gl_free_types
+    gl_answer GET_projects_a_2Fb_issues "[$(gl_issue_json '[]')]"
+    t_run board issue list --type ISSUE --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" 'issue_type=issue'
+    t_jq "$T_OUT" length 1
+}
+
+# 13. An explicit type against a default one.
+
+test_an_explicit_type_equal_to_the_default_is_still_explicit() {
+    gitlab_board
+    gl_free_types
+    gl_parent ISSUE
+    printf '\n[board.defaults]\ntype = "Issue"\n' >>"$WORKFLOW_FILE"
+    t_run board issue create --title t --type Issue --parent 9
+    t_status 3
+    t_lacks "$(cat "$FAKE_LOG")" POST
+}
+
+# 14. The warning about more issues.
+
+test_exactly_the_limit_does_not_warn() {
+    gitlab_board
+    gl_headed GET_projects_a_2Fb_issues '' 100
+    t_run board issue list --limit 100 --json
+    t_status 0
+    t_jq "$T_OUT" length 100
+    t_lacks "$T_ERR" 'more exist'
+}
+
+test_a_next_page_at_the_limit_warns() {
+    gitlab_board
+    gl_headed GET_projects_a_2Fb_issues 2 100
+    t_run board issue list --limit 100 --json
+    t_status 0
+    t_contains "$T_ERR" 'more exist'
+}
+
+test_headers_of_a_refused_page_do_not_hide_the_code() {
+    gitlab_board
+    printf 'HTTP/2.0 403 Forbidden\nX-Page: 1\n\n{"message":"403 Forbidden"}\n' >"$FAKE_OVERRIDE/GET_projects_a_2Fb_issues.json"
+    printf 'glab: 403 Forbidden (HTTP 403)\n' >"$FAKE_OVERRIDE/GET_projects_a_2Fb_issues.err"
+    printf 1 >"$FAKE_OVERRIDE/GET_projects_a_2Fb_issues.status"
+    t_run board issue list
+    t_status 5
+    t_contains "$T_ERR" '403 Forbidden'
+}
+
+test_milestone_at_the_limit_does_not_warn() {
+    gitlab_board
+    {
+        printf 'HTTP/2.0 200 OK\nX-Next-Page: \n\n'
+        jq -cn '[range(100) | {id: ., title: "m", state: "active"}]'
+    } >"$FAKE_OVERRIDE/GET_projects_a_2Fb_milestones.json"
+    t_run board milestone list --limit 100 --json
+    t_status 0
+    t_jq "$T_OUT" length 100
+    t_lacks "$T_ERR" 'more exist'
+}
+
+# 15. An iteration with no title.
+
+test_an_untitled_iteration_has_one_name() {
+    gitlab_board
+    gl_answer WorkItemTypes '{"data":{"project":{"workItemTypes":{"nodes":[{"name":"Issue","widgetDefinitions":[{"type":"ITERATION"}]}]}}}}'
+    gl_answer GET_projects_a_2Fb_iterations '[{"id":4,"title":null,"state":2,"start_date":"2026-11-15","due_date":"2026-11-28"}]'
+    gl_issue '[]'
+    gl_answer GET_projects_a_2Fb_issues_1 "$(gl_issue_json '[]' | sed 's/"milestone":null/"iteration":{"title":null,"start_date":"2026-11-15","due_date":"2026-11-28"},"milestone":null/')"
+    t_run board sprint current --jq .name
+    t_status 0
+    from_sprint=$T_OUT
+    t_run board issue view 1 --jq .sprint
+    t_status 0
+    t_eq "$T_OUT" "$from_sprint" 'name on the issue'
 }
 
 # --- hostile answers ---------------------------------------------------------------------

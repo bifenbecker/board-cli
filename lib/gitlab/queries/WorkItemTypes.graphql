@@ -4,7 +4,12 @@ query WorkItemTypes($path: ID!) {
       nodes {
         id
         name
-        widgetDefinitions { type }
+        widgetDefinitions {
+          type
+          ... on WorkItemWidgetDefinitionHierarchy {
+            allowedParentTypes { nodes { name } }
+          }
+        }
       }
     }
   }

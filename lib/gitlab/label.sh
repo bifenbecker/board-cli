@@ -24,19 +24,22 @@ gitlab_label_create() {
     gitlab_lc_doc=$(printf '%s' "$gitlab_lc_intent" | _jq -c '
         {name, color: ("#" + (.color // "6699cc"))} + (if .description != null then {description} else {} end)' |
         gitlab_rest_body POST "projects/$GL_ID/labels") || return $?
+    gitlab_has_id "$gitlab_lc_doc" label || return $?
     printf '%s' "$gitlab_lc_doc" | _jq -c ''"$BOARD_LIB"' gl_label'
 }
 
 gitlab_label_edit() {
     gitlab_le_intent=$(cat)
-    gitlab_le_name=$(printf '%s' "$gitlab_le_intent" | _jq -r .name)
+    gitlab_le_name=$(gitlab_label_real "$(printf '%s' "$gitlab_le_intent" | _jq -r .name)") || return $?
     gitlab_le_doc=$(printf '%s' "$gitlab_le_intent" | _jq -c '
         (if .new_name then {new_name} else {} end) + (if .color then {color: ("#" + .color)} else {} end)
         + (if .description != null then {description} else {} end)' |
         gitlab_rest_body PUT "projects/$GL_ID/labels/$(board_urlencode "$gitlab_le_name")") || return $?
+    gitlab_has_id "$gitlab_le_doc" label || return $?
     printf '%s' "$gitlab_le_doc" | _jq -c ''"$BOARD_LIB"' gl_label'
 }
 
 gitlab_label_delete() {
-    gitlab_rest DELETE "projects/$GL_ID/labels/$(board_urlencode "$1")" >/dev/null
+    gitlab_ld_name=$(gitlab_label_real "$1") || return $?
+    gitlab_rest DELETE "projects/$GL_ID/labels/$(board_urlencode "$gitlab_ld_name")" >/dev/null
 }

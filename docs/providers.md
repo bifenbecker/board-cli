@@ -78,9 +78,24 @@ Tool: `glab`, tested on 1.110.0. Always pass `--hostname`: glab may also be logg
 - `due_date: null`, `milestone_id: 0` and `assignee_ids: []` clear a field. Assignees are numeric
   ids, the whole list at once.
 - A work item's global id is `gid://gitlab/WorkItem/<id>`, with the REST `id`, not the `iid`.
-- Hierarchy on Free is Issue => Task. `workItemUpdate` refuses an Issue under an Issue with exit 0
-  and text in the payload: `errors: ["#5 cannot be added: it's not allowed to add this type of
-  parent item"]`. `parentId: null` clears a parent, and succeeds when there is none.
+- `allowedParentTypes` on the `HIERARCHY` widget of `workItemTypes` states the rule. On Free a Task
+  can sit under an Incident, Issue or Ticket, and an Issue under nothing. `workItemUpdate` refuses
+  anything else with exit 0 and text in the payload: `errors: ["#5 cannot be added: it's not allowed
+  to add this type of parent item"]`, so ask first. `parentId: null` clears a parent, and succeeds
+  when there is none.
+- A line of a description or a note that starts with `/` runs as a quick action: `/close` closes
+  the issue, and the line is gone from the text. A note made only of actions answers with no `id`,
+  and a note edited to `/close` is deleted. `\/close` is stored as text and renders as `/close`.
+  With 1 to 4 spaces before it a note did not run on gitlab.com; the adapter escapes up to 3 anyway,
+  which reads back the same.
+- Labels are matched exactly: a write in another case creates a second label, and `remove_labels` in
+  another case does nothing, both with exit 0.
+- In a list, `labels=Any` and `labels=None` are keywords, and a comma splits a name in two.
+  `milestone=` is case-sensitive and has the keywords `Any` and `None`, and `Upcoming` and `Started`
+  by the API documentation; those two were accepted, but could not be told apart here.
+- `glab api -i` prints `HTTP/2.0 200 OK`, the headers, a blank line and the body, on stdout, also on
+  an error. `X-Next-Page` is empty on the last page, so a full page can be told from one that has
+  more.
 - REST creates a Task with `issue_type: task` but refuses to change an Issue to one: `can not be
   changed to Task`. `workItemConvert` does it, and then the Issue can have a parent.
 - Links: `target_project_id` must be the numeric id; the encoded path that works in a URL is `404
