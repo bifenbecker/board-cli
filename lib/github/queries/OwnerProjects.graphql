@@ -1,0 +1,7 @@
+query OwnerProjects($owner: String!) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner {
+      projectsV2(first: 50) { nodes { number title url closed } }
+    }
+  }
+}

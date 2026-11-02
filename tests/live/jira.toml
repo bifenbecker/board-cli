@@ -1,0 +1,12 @@
+# The Jira test board: project KAN, team-managed, on Cloud. Everything on it may be created and
+# deleted. The config beside this file names the same site, and holds no secret.
+[board]
+kind      = "jira"
+cli       = "jira"
+url       = "https://work-40585442.atlassian.net"
+project   = "KAN"
+config    = "jira.yml"
+issue_uri = "/browse/{ticket}"
+
+[board.target]
+board = 1

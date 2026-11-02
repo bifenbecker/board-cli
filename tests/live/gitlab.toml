@@ -1,0 +1,15 @@
+# The GitLab test board, on the Free tier. Everything on it may be created and deleted.
+[board]
+kind      = "gitlab"
+cli       = "glab"
+url       = "https://gitlab.com/bulgakovra.w/test-board-cli"
+project   = "#"
+issue_uri = "/-/work_items/{ticket}"
+
+[board.target]
+board = 11734286
+
+[board.statuses]
+"status::todo"        = "todo"
+"status::in-progress" = "in_progress"
+"status::done"        = "done"

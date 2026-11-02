@@ -1,0 +1,8 @@
+{
+  "id": "string",
+  "author": "object|null",
+  "body": "string|null",
+  "url": "string|null",
+  "created_at": "string|null",
+  "updated_at": "string|null"
+}

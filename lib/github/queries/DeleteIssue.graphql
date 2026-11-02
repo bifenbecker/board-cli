@@ -1,0 +1,3 @@
+mutation DeleteIssue($id: ID!) {
+  deleteIssue(input: {issueId: $id}) { clientMutationId }
+}

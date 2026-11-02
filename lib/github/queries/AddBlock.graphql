@@ -1,0 +1,3 @@
+mutation AddBlock($issueId: ID!, $blockingIssueId: ID!) {
+  addBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) { issue { id } }
+}

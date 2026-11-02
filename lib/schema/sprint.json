@@ -1,0 +1,7 @@
+{
+  "id": "string",
+  "name": "string",
+  "state": "string",
+  "start_date": "string|null",
+  "end_date": "string|null"
+}

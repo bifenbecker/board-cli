@@ -1,0 +1,3 @@
+mutation RemoveBlock($issueId: ID!, $blockingIssueId: ID!) {
+  removeBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) { issue { id } }
+}

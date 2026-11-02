@@ -1,0 +1,36 @@
+
+fragment IssueFields on Issue {
+  id
+  number
+  title
+  body
+  url
+  state
+  stateReason
+  createdAt
+  updatedAt
+  repository { nameWithOwner }
+  author { login ... on User { name } }
+  assignees(first: 20) { nodes { login name } }
+  labels(first: 100) { nodes { name } }
+  milestone { title }
+  issueType { name }
+  parent { id number repository { nameWithOwner } }
+  subIssues(first: 50) { nodes { number repository { nameWithOwner } } }
+  blockedBy(first: 20) { nodes { id number repository { nameWithOwner } } }
+  blocking(first: 20) { nodes { id number repository { nameWithOwner } } }
+  relatesTo(first: 20) { nodes { id number repository { nameWithOwner } } }
+  duplicateOf { id number repository { nameWithOwner } }
+}
+
+fragment ItemFields on ProjectV2Item {
+  id
+  type
+  isArchived
+  createdAt
+  updatedAt
+  status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name optionId } }
+  priority: fieldValueByName(name: $priorityField) { ... on ProjectV2ItemFieldSingleSelectValue { name optionId } }
+  due: fieldValueByName(name: $dueField) { ... on ProjectV2ItemFieldDateValue { date } }
+  sprint: fieldValueByName(name: $sprintField) { ... on ProjectV2ItemFieldIterationValue { title iterationId } }
+}

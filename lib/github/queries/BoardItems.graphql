@@ -1,0 +1,20 @@
+query BoardItems($owner: String!, $number: Int!, $query: String, $first: Int!, $after: String, $priorityField: String!, $dueField: String!, $sprintField: String!) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        items(first: $first, after: $after, query: $query, orderBy: {field: POSITION, direction: ASC}) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            ...ItemFields
+            content {
+              __typename
+              ... on Issue { ...IssueFields }
+              ... on DraftIssue { id title body createdAt updatedAt creator { login } assignees(first: 20) { nodes { login name } } }
+              ... on PullRequest { id number title body url state createdAt updatedAt repository { nameWithOwner } author { login } assignees(first: 20) { nodes { login name } } labels(first: 50) { nodes { name } } milestone { title } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

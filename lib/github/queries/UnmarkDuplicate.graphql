@@ -1,0 +1,3 @@
+mutation UnmarkDuplicate($duplicateId: ID!, $canonicalId: ID!) {
+  unmarkIssueAsDuplicate(input: {duplicateId: $duplicateId, canonicalId: $canonicalId}) { clientMutationId }
+}

@@ -5,7 +5,7 @@ set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 BOARD_HOME=$root
-for lib in util exec config json args help provider dispatch; do
+for lib in util exec gql config json args help provider dispatch; do
     . "$root/lib/core/$lib.sh"
 done
 for file in "$root"/lib/cmd/*.sh; do
