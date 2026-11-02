@@ -73,6 +73,7 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub, GitLab: also declare the status in [board.statuses]: the board has no category to store.
+  GitLab: adds a label, and a list for it on [board.target] board or the first board.
   Linear: the status is added to the team.
   Jira: not supported: statuses belong to workflows, which need an administrator.
 
@@ -160,6 +161,7 @@ OUTPUT
 
 PLATFORM NOTES
   GitHub: issues still in the status lose it.
+  GitLab: deletes the label and its list. Issues still in the status lose it.
   Linear: the status is archived, and that is refused while issues are in it: exit 1. Two statuses
           may share a name: exit 2 lists them, and <name> then takes the id.
   Jira: not supported: statuses belong to workflows, which need an administrator.

@@ -73,5 +73,7 @@ test_linear_shapes() {
 }
 
 test_jira_shapes() {
+    BOARD_JIRA_HOSTS=work-40585442.atlassian.net
+    export BOARD_JIRA_HOSTS
     shape_board jira curl
 }
