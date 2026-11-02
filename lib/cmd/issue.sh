@@ -133,7 +133,8 @@ PLATFORM NOTES
           otherwise. parent is null unless --parent is given.
   Jira: --status with a name no status has lists nothing on Cloud, and is not an error. --search
         takes words: each is matched as it stands, so AND, OR, NOT and * are text, not operators.
-  Linear: --type is not supported; there are no issue types.
+  Linear: --type is not supported; there are no issue types. With [board.target] project only that
+          project is listed, but an issue outside it stays reachable by id.
 
 EXAMPLES
   board issue list
@@ -207,6 +208,10 @@ OUTPUT
   JSON: $ISSUE_SHAPE
   With --comments, also comments[{id, author{id, name}, body, url, created_at, updated_at}].
 
+PLATFORM NOTES
+  Linear: any issue of the workspace is reachable by id, also outside [board.target] project.
+  GitHub: any issue is reachable as owner/repo#number, also outside the project.
+
 EXAMPLES
   board issue view KAN-1
   board issue view 3KD-13 --comments
@@ -276,7 +281,9 @@ FLAGS
 OUTPUT
   Text: the URL of the issue.
   JSON: $ISSUE_SHAPE
-  Exit 6 means the issue exists but a later step failed: the id is on stdout.
+  Exit 6 means the issue exists but a later step failed: the id is on stdout. When the create
+  itself timed out it may or may not exist and there is no id yet: exit 6 with nothing on stdout.
+  Look for it with 'board issue list' before repeating the command.
 
 PLATFORM NOTES
   GitHub: the issue is created in the repository of [board] url and added to the project. Issue
@@ -390,6 +397,7 @@ PLATFORM NOTES
         a second and it is exit 3, unless the first is removed in the same call. An assignee is
         the exact name, email or id: anything else is exit 4. --sprint needs [board.target] board.
         The markdown limits of 'board issue create' apply to --body.
+  Linear: one assignee only: --add-assignee replaces the current one. --type is not supported.
 
 EXAMPLES
   board issue edit KAN-1 --title "A better title"
@@ -463,6 +471,8 @@ PLATFORM NOTES
           issue, and closing sets Done. Read the issue again before relying on a final state.
   GitLab: on Free a status is a label. board removes the other status labels in the same call. A
           status mapped to done or canceled also closes the issue, and any other reopens it.
+  Linear: two statuses may share a name: exit 2 lists them, and <status> then takes the id from
+          'board status list --json'.
 
 EXAMPLES
   board issue move KAN-1 "In Progress"
@@ -603,7 +613,7 @@ OUTPUT
   JSON: {id, deleted}
 
 PLATFORM NOTES
-  Linear: moves the issue to the trash, where it stays for 30 days.
+  Linear: moves the issue to the trash, where it stays for 30 days. board treats it as gone.
   GitHub: deleting needs admin rights on the repository. A draft item is removed from the project.
   GitLab: deleting needs the Owner role.
 
@@ -915,6 +925,8 @@ PLATFORM NOTES
   GitHub: duplicates also closes <id>.
   GitLab: on Free only relates works: exit 3 for blocks and blocked-by. duplicates is not
           available: exit 3.
+  Linear: two issues hold one link at a time: a new link between them replaces the old one.
+          duplicates also moves <id> to the Duplicate status; removing the link moves it back.
 
 EXAMPLES
   board issue link add KAN-1 KAN-2 --type blocks

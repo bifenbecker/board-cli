@@ -185,7 +185,7 @@ OUTPUT
 
 PLATFORM NOTES
   Jira: closed releases the version.
-  Linear: --state is not supported: a project milestone has none.
+  Linear: --state is not supported: a project milestone closes by itself when its issues are done.
 
 EXAMPLES
   board milestone edit 3 --state closed

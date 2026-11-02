@@ -1,0 +1,3 @@
+mutation RelationCreate {
+  issueRelationCreate(input: {issueId: $issue, relatedIssueId: $other, type: %type}) { success }
+}

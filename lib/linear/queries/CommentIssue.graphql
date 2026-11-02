@@ -1,0 +1,3 @@
+query CommentIssue {
+  comment(id: $id) { issue { id } }
+}

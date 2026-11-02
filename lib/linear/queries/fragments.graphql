@@ -1,0 +1,19 @@
+
+fragment IssueRow on Issue {
+  id
+  identifier
+  title
+  description
+  url
+  priority
+  dueDate
+  trashed
+  createdAt
+  updatedAt
+  state { id name type }
+  assignee { id name displayName }
+  creator { id name displayName }
+  parent { identifier }
+  cycle { number name }
+  projectMilestone { name }
+}

@@ -1,0 +1,16 @@
+query CommentList {
+  issue(id: $id) {
+    comments(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        body
+        url
+        createdAt
+        updatedAt
+        user { id name displayName }
+        externalUser { id name }
+      }
+    }
+  }
+}

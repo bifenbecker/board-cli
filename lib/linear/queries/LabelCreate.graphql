@@ -1,0 +1,3 @@
+mutation LabelCreate {
+  issueLabelCreate(input: $input) { success issueLabel { id name color description } }
+}
