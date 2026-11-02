@@ -306,3 +306,14 @@ test_write_timeout_in_a_move_prints_the_id() {
     t_status 6
     t_eq "$T_OUT" 11 stdout
 }
+
+test_an_inherited_write_id_is_not_printed() {
+    gh_board
+    printf 124 >"$FAKE_OVERRIDE/POST_repos_a_b_issues.status"
+    : >"$FAKE_OVERRIDE/POST_repos_a_b_issues.json"
+    export BOARD_WRITE_ID=99
+    t_run board issue create --title t
+    unset BOARD_WRITE_ID
+    t_status 6
+    t_eq "$T_OUT" '' stdout
+}
