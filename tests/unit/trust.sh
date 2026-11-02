@@ -78,3 +78,15 @@ EOF
     t_status 0
     t_eq "$T_OUT" me
 }
+
+test_foreign_gitlab_host_is_refused() {
+    t_workflow <<'EOF'
+[board]
+kind = "gitlab"
+url  = "https://gitlab.evil.example/a/b"
+EOF
+    t_run board issue list
+    t_status 5
+    t_contains "$T_ERR" BOARD_TRUSTED_HOSTS
+    [ ! -s "$FAKE_LOG" ] || t_fail "the host was reached: $(cat "$FAKE_LOG")"
+}

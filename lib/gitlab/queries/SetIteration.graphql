@@ -1,0 +1,3 @@
+mutation SetIteration($id: WorkItemID!, $iteration: IterationID) {
+  workItemUpdate(input: {id: $id, iterationWidget: {iterationId: $iteration}}) { errors }
+}

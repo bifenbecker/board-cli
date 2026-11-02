@@ -155,9 +155,10 @@ scenario() {
     fi
 
     if [ -n "$b" ]; then
-        maybe 'parent' ".parent == \"$a\"" issue edit "$b" --parent "$a" --json
-        maybe 'subtasks' ".subtasks | index(\"$b\") != null" issue view "$a" --json
-        maybe 'clear parent' '.parent == null' issue edit "$b" --clear parent --json
+        maybe 'parent' ".parent == \"$a\"" issue edit "$b" --parent "$a" --json && {
+            maybe 'subtasks' ".subtasks | index(\"$b\") != null" issue view "$a" --json
+            maybe 'clear parent' '.parent == null' issue edit "$b" --clear parent --json
+        }
         maybe 'link blocks' ".links | map(.id) | index(\"$b\") != null" issue link add "$a" "$b" --type blocks --json &&
             step 'link list' 'length > 0' issue link list "$b" --json &&
             step 'link remove' ".links | map(.id) | index(\"$b\") == null" issue link remove "$a" "$b" --type blocks --json

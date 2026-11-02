@@ -1,0 +1,17 @@
+query IssueHierarchy($path: ID!, $iid: String!) {
+  project(fullPath: $path) {
+    workItems(iid: $iid, first: 1) {
+      nodes {
+        widgets {
+          ... on WorkItemWidgetHierarchy {
+            parent { iid }
+            children(first: 100) {
+              nodes { iid }
+              pageInfo { hasNextPage }
+            }
+          }
+        }
+      }
+    }
+  }
+}

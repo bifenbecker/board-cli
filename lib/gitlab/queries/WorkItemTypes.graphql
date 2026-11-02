@@ -1,0 +1,16 @@
+query WorkItemTypes($path: ID!) {
+  project(fullPath: $path) {
+    workItemTypes {
+      nodes {
+        id
+        name
+        widgetDefinitions {
+          type
+          ... on WorkItemWidgetDefinitionHierarchy {
+            allowedParentTypes { nodes { name } }
+          }
+        }
+      }
+    }
+  }
+}
