@@ -24,6 +24,18 @@ jobs:
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just
+      # forge runs with the release token: pinned by commit, never fetched by a movable tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: bifenbecker/forge-cli
+          ref: 57ae94f3a38a4c4a6b5c9b6432f2b6975e1c38eb # v0.2.0
+          path: .forge
+          persist-credentials: false
+      - name: Install forge
+        run: |
+          sh .forge/install.sh --from .forge
+          rm -rf .forge
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
       - name: Identify the tagger
         run: |
           git config user.name "github-actions[bot]"
