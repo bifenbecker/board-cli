@@ -81,12 +81,23 @@ board_exec() {
     return "$board_ex_status"
 }
 
+# Prints an id on the stdout of board itself (fd 9, opened by bin/board), so a call inside $(...)
+# cannot swallow it. Without fd 9, as in a unit test of a single function, plain stdout.
+# Usage: board_print_id <id>
+board_print_id() {
+    if { true >&9; } 2>/dev/null; then
+        printf '%s\n' "$1" >&9
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
 # A tool ran out of time. A read failed; a write may or may not have happened, so it must not be
 # repeated blindly. BOARD_WRITE starts as "this command writes": an adapter's transport narrows it
 # to each call, so a read that times out before any write stays a plain failure.
 board_timed_out() {
     if [ -n "${BOARD_WRITE:-}" ]; then
-        [ -z "${BOARD_WRITE_ID:-}" ] || printf '%s\n' "$BOARD_WRITE_ID"
+        [ -z "${BOARD_WRITE_ID:-}" ] || board_print_id "$BOARD_WRITE_ID"
         board_warn "timed out after ${BOARD_TIMEOUT}s: the write may have gone through. Check before repeating it"
         return "$BOARD_EXIT_PARTIAL"
     fi
