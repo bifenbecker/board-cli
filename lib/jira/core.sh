@@ -11,8 +11,6 @@ JIRA_READY='' JIRA_TRUSTED='' JIRA_BODY='' JIRA_MOVE_ID='' JIRA_PARENT_EDIT='' J
 
 jira_env() {
     [ -z "${JIRA_READY:-}" ] || return 0
-    # Steps run inside $(...) and >/dev/null. Fd 4 is the adapter's own stdout, where exit 6 owes the id.
-    exec 4>&1
     JIRA_PROJECT=${BOARD_PROJECT:-}
     JIRA_BOARD=$(board_config_get .target.board)
     if [ -n "${BOARD_URL:-}" ]; then
@@ -168,7 +166,7 @@ jira_request() {
     # A read wrote nothing, even in a command that goes on to write.
     [ "$1" != GET ] || BOARD_WRITE=''
     if [ "$jira_rq_status" = "$BOARD_EXIT_TIMEOUT" ]; then
-        board_timed_out >&4
+        board_timed_out
         return $?
     fi
     case $jira_rq_status in
@@ -185,9 +183,10 @@ jira_request() {
     return "$BOARD_EXIT_ERROR"
 }
 
-# A write that may have arrived: exit 6, with the id when it is known.
+# A write that may have arrived: exit 6, with the id when it is known. board_print_id reaches past
+# the $(...) the step runs in, so jira_stop must not print the id again.
 jira_unknown() {
-    [ -z "${BOARD_WRITE_ID:-}" ] || printf '%s\n' "$BOARD_WRITE_ID" >&4
+    [ -z "${BOARD_WRITE_ID:-}" ] || board_print_id "$BOARD_WRITE_ID"
     board_warn "$1"
     return "$BOARD_EXIT_PARTIAL"
 }

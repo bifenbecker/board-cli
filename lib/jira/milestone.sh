@@ -31,7 +31,6 @@ jira_milestone_view() {
 
 jira_milestone_create() {
     jira_require_project
-    BOARD_WRITE_ID=''
     jira_mc_doc=$(jira_version_body | _jq -c --arg p "$JIRA_PROJECT" '. + {project: $p}' |
         jira_send POST /rest/api/2/version) || return $?
     jira_written "$jira_mc_doc" id >/dev/null || return $?

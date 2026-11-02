@@ -324,7 +324,7 @@ jira_bulk_move() {
         [ -z "$jira_bm_first" ] || rm -f "$BOARD_TMP/jira.wrote"
         return "$BOARD_EXIT_ERROR"
     done
-    board_timed_out >&4
+    board_timed_out
 }
 
 # Decides what a --parent asks for, before anything is written. A plain edit takes a parent one
@@ -457,8 +457,6 @@ jira_finish() {
 
 jira_issue_create() {
     jira_require_project
-    # There is no id until the answer says so, and an inherited one would be a false promise.
-    BOARD_WRITE_ID=''
     jira_cr_intent=$(cat)
     jira_check_priority "$jira_cr_intent" || return $?
     if printf '%s' "$jira_cr_intent" | _jq -e '.assignees | length > 1' >/dev/null; then
@@ -634,7 +632,6 @@ jira_comment_write() {
 
 jira_issue_comment_add() {
     jira_safe "<id>" "$1"
-    BOARD_WRITE_ID=''
     jira_comment_write POST "/rest/api/2/issue/$1/comment" "$1"
 }
 
