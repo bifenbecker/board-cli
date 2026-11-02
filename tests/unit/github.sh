@@ -317,3 +317,13 @@ test_an_inherited_write_id_is_not_printed() {
     t_status 6
     t_eq "$T_OUT" '' stdout
 }
+
+test_an_inherited_gh_host_is_dropped_for_github_com() {
+    gh_board
+    gh_issue_answer
+    export GH_HOST=gh.evil.example
+    t_run board issue view 11
+    unset GH_HOST
+    t_status 0
+    t_lacks "$(gh_log)" 'evil' log
+}
