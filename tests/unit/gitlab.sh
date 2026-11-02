@@ -1699,6 +1699,42 @@ test_an_untitled_iteration_has_one_name() {
     t_eq "$T_OUT" "$from_sprint" 'name on the issue'
 }
 
+# --- the environment ---------------------------------------------------------------------
+
+test_inherited_ready_does_not_skip_the_setup() {
+    gitlab_board
+    gl_issue '[]'
+    GL_READY=1
+    export GL_READY
+    t_run board issue view 1 --json
+    t_status 0
+    t_jq "$T_OUT" .id '"1"'
+}
+
+test_inherited_wrote_does_not_make_a_failure_partial() {
+    gitlab_board
+    gl_free_types
+    gl_issue '[]'
+    gl_answer GET_projects_a_2Fb_issues_1 "$(gl_issue_json '[]' | sed 's/"ISSUE"/"TASK"/')"
+    gl_parent ISSUE
+    gl_answer SetParent '{"data":{"workItemUpdate":{"errors":["reached maximum depth"]}}}'
+    GL_WROTE=1
+    export GL_WROTE
+    t_run board issue edit 1 --parent 9
+    t_status 3
+    t_eq "$T_OUT" '' stdout
+}
+
+test_an_inherited_host_does_not_reach_glab_unasked() {
+    gitlab_board
+    gl_issue '[]'
+    GITLAB_HOST=evil.example GL_HOST=evil.example
+    export GITLAB_HOST GL_HOST
+    t_run board issue view 1 --json
+    t_status 0
+    t_lacks "$(grep -v -- '--hostname gitlab.example.com' "$FAKE_LOG")" 'glab api' 'a call without --hostname'
+}
+
 # --- hostile answers ---------------------------------------------------------------------
 
 test_a_name_from_the_board_cannot_run_as_code() {

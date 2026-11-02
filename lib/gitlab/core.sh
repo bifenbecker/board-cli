@@ -3,6 +3,10 @@
 # GitLab adapter: transport, classification and the board-level calls. The board is a project with
 # an issue board: [board] url names the project and [board.target] board picks one of its boards.
 
+# Set at load, so a value inherited from the environment cannot skip the setup or fake a write.
+GL_READY=''
+GL_WROTE=''
+
 # Sets GL_PATH, GL_ID, GL_WEB and GL_ISSUES from a project URL or the URL of one of its pages.
 gitlab_project_of() {
     gitlab_po_rest=${1#*://}
