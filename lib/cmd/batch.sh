@@ -11,11 +11,12 @@ USAGE
 DESCRIPTION
   Reads one command per line from stdin, as a JSON array of its words without "board":
   ["issue","move","KAN-1","Done","--from","To Do"]. There is no shell quoting: each string is one
-  argument. Blank lines are skipped. Every line is checked before any runs: a line that is not
-  such an array, names no command, or names batch, init, api or self is exit 2, and nothing runs.
+  argument. Blank lines are skipped. Every line is checked before any runs, for its shape and its
+  command only: a line that is not such an array, names no command, names batch, init, api or
+  self, or carries --dry-run or --jq is exit 2, and nothing runs. Pass --dry-run to batch itself.
   Lines then run in order, each as 'board --json <words>' would, and the first failure stops the
-  rest. --dry-run passes to every line.
-  A line cannot read stdin: --body-file - is exit 2. Put long text in a file.
+  rest. Flags and values are checked as each line runs, so a mistake in one is a failure of that
+  line. A line cannot read stdin: its --body-file - fails with exit 2. Put long text in a file.
 
 FLAGS
   -k, --keep-going   Run every line, whatever fails
@@ -23,7 +24,8 @@ FLAGS
 OUTPUT
   Text: one line per command, tab-separated: exit code (- when not run), the command, then the
         URL, id or name it gave, or the first line of its error.
-  JSON: array of {args[], exit, result, error}, one per line in order, printed whatever the exit.
+  JSON: array of {args[], exit, result, error}, one per line in order, printed once lines run,
+        whatever their exit.
   result is what the command prints with --json: for exit 6 the id as a string, null when it
   prints nothing. error is its stderr when it failed, else null. exit is null for a line that did
   not run.
@@ -38,9 +40,10 @@ EXAMPLES
 EOF
 }
 
-# Usage: batch_set_args <line JSON>  — prints a 'set --' of its words, for eval.
+# Usage: batch_set_args <line JSON> [key]  — prints a 'set --' of its args, or of another list of
+# words in the line, for eval.
 batch_set_args() {
-    printf '%s' "$1" | _jq -r '"set -- " + (.args | map(@sh) | join(" "))'
+    printf '%s' "$1" | _jq -r --arg k "${2:-args}" '"set -- " + (.[$k] | map(@sh) | join(" "))'
 }
 
 # Prints true when the command of a line changes the board, false when it does not. Dies when it
@@ -49,7 +52,7 @@ batch_set_args() {
 # Usage: batch_line_writes <line JSON> <line number>
 batch_line_writes() {
     batch_lw_n=$2
-    eval "$(batch_set_args "$1")"
+    eval "$(batch_set_args "$1" words)"
     case $1 in
         batch | init | api | self) board_usage_die "line $batch_lw_n: board $1 cannot run inside a batch" ;;
     esac
@@ -66,9 +69,8 @@ batch_check() {
     : >"$BOARD_TMP/batch.todo"
     while IFS= read -r batch_ck_line; do
         batch_ck_n=$(printf '%s' "$batch_ck_line" | _jq -r .n)
-        if printf '%s' "$batch_ck_line" | _jq -e '.bad' >/dev/null; then
-            board_usage_die "line $batch_ck_n: not a JSON array of words, such as [\"issue\",\"view\",\"1\"]"
-        fi
+        batch_ck_bad=$(printf '%s' "$batch_ck_line" | _jq -r '.bad // ""')
+        [ -z "$batch_ck_bad" ] || board_usage_die "line $batch_ck_n: $batch_ck_bad"
         batch_ck_writes=$(batch_line_writes "$batch_ck_line" "$batch_ck_n") || exit $?
         printf '%s' "$batch_ck_line" | _jq -c --argjson w "$batch_ck_writes" '. + {writes: $w}' >>"$BOARD_TMP/batch.todo"
     done <"$BOARD_TMP/batch.lines"
@@ -85,14 +87,23 @@ batch_run() {
     if [ "$batch_rn_status" = 0 ]; then
         sed "s/^board: /board: line $batch_rn_n: /" "$BOARD_TMP/batch.stderr" >&2
     fi
-    _jq -Rsc --argjson line "$batch_rn_line" --argjson exit "$batch_rn_status" --arg err "$(cat "$BOARD_TMP/batch.stderr")" '
-        rtrimstr("\n") as $out
-        | {args: $line.args, exit: $exit,
-           result: (if $out == "" then null
-                    elif $exit == 6 and ($out | test("^[\\[{]") | not) then $out
-                    else ($out | try fromjson catch $out) end),
-           error: (if $exit == 0 or $err == "" then null else $err end)}' \
-        <"$BOARD_TMP/batch.stdout" >>"$BOARD_TMP/batch.done"
+    # Line, stdout and stderr go through stdin: any of them can be longer than argv allows.
+    if _jq -Rs . <"$BOARD_TMP/batch.stdout" >"$BOARD_TMP/batch.out.json" &&
+        _jq -Rs . <"$BOARD_TMP/batch.stderr" >"$BOARD_TMP/batch.err.json" &&
+        { printf '%s\n' "$batch_rn_line"; cat "$BOARD_TMP/batch.out.json" "$BOARD_TMP/batch.err.json"; } |
+        _jq -sc --argjson exit "$batch_rn_status" '
+            .[0].args as $args | (.[1] | rtrimstr("\n")) as $out | (.[2] | rtrimstr("\n")) as $err
+            | {args: $args, exit: $exit,
+               result: (if $out == "" then null
+                        elif $exit == 6 and ($out | test("^[\\[{]") | not) then $out
+                        else ($out | try fromjson catch $out) end),
+               error: (if $exit == 0 or $err == "" then null else $err end)}' >"$BOARD_TMP/batch.entry"; then
+        cat "$BOARD_TMP/batch.entry" >>"$BOARD_TMP/batch.done"
+        return 0
+    fi
+    # The line ran: its entry must not go missing, or every later one would read as the wrong line.
+    printf '%s' "$batch_rn_line" | _jq -c --argjson exit "$batch_rn_status" \
+        '{args, exit: $exit, result: null, error: "board could not record what this line printed"}' >>"$BOARD_TMP/batch.done"
 }
 
 cmd_batch() {
@@ -104,11 +115,16 @@ cmd_batch() {
             *) board_unexpected "$1" ;;
         esac
     done
+    # words is what names the command: --json is every line's anyway.
     _jq -nRc '[inputs] | to_entries[] | select(.value | test("\\S"))
+        | (.key + 1) as $n
         | (.value | try fromjson catch null) as $a
         | if ($a | type) == "array" and ($a | length) > 0 and all($a[]; type == "string")
-             and ($a[0] | startswith("-") | not)
-          then {n: (.key + 1), args: $a} else {n: (.key + 1), bad: true} end' \
+             and ($a[0] | startswith("-") | not) then
+              (if any($a[]; . == "--dry-run" or . == "--jq" or startswith("--jq=")) then
+                   {n: $n, bad: "--dry-run and --jq go to batch itself, not to a line"}
+               else {n: $n, args: $a, words: ($a | map(select(. != "--json")))} end)
+          else {n: $n, bad: "not a JSON array of words, such as [\"issue\",\"view\",\"1\"]"} end' \
         >"$BOARD_TMP/batch.lines" || board_usage_die "stdin cannot be read"
     batch_check
 

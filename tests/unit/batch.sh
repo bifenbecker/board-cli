@@ -98,6 +98,26 @@ test_batch_refuses_an_unknown_command_and_its_own_kind() {
     [ ! -s "$FAKE_LOG" ] || t_fail "a line ran: $(cat "$FAKE_LOG")"
 }
 
+test_batch_refuses_dry_run_and_jq_inside_a_line() {
+    batch_board
+    batch_in '["label","create","a","--dry-run"]'
+    batch
+    t_status 2
+    t_contains "$T_ERR" 'line 1: --dry-run and --jq go to batch itself'
+    batch_in '["status","list","--jq",".[0]"]'
+    batch
+    t_status 2
+    [ ! -s "$FAKE_LOG" ] || t_fail "a line ran: $(cat "$FAKE_LOG")"
+}
+
+test_batch_line_may_carry_json_anywhere() {
+    batch_board
+    batch_in '["status","--json","list"]'
+    batch --json
+    t_status 0
+    t_jq "$T_OUT" '.[0].exit' 0
+}
+
 test_batch_passes_dry_run_to_every_line() {
     batch_board
     batch_in '["label","create","a"]'

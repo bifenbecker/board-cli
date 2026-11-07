@@ -219,7 +219,7 @@ ARGUMENTS
   <id>         The milestone, as 'board milestone list' shows it
 
 FLAGS
-  -y, --yes    Really delete it
+  -y, --yes    Really delete it. A --dry-run needs none
 
 OUTPUT
   Text: nothing.
@@ -244,7 +244,7 @@ cmd_milestone_delete() {
         esac
     done
     board_require_id "$arg_id"
-    [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
+    [ -n "$opt_yes" ] || board_dry_run || board_usage_die "deleting needs --yes"
     board_doc=$(board_call milestone_delete "$arg_id") || board_fail "$?" "$board_doc"
     if board_dry_run; then
         printf '%s\n' "$board_doc" | board_output text_plan

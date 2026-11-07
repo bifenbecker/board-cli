@@ -510,7 +510,7 @@ cmd_issue_move() {
     arg_id='' arg_status='' arg_count=0 opt_from=''
     while [ $# -gt 0 ]; do
         case $1 in
-            --from) board_arg "$@"; opt_from=$2; shift 2 ;;
+            --from) board_arg "$@"; [ -n "$2" ] || board_usage_die "--from must not be empty"; opt_from=$2; shift 2 ;;
             -*) board_unknown_flag "$1" ;;
             *)
                 arg_count=$((arg_count + 1))
@@ -559,6 +559,7 @@ OUTPUT
 
 PLATFORM NOTES
   Jira: --reason canceled needs a status declared canceled in [board.statuses].
+  GitHub, GitLab: an issue with no status never matches --from.
   GitHub: --reason canceled closes the issue as not planned. The built-in workflow "Item closed"
           may then set the status to Done.
   GitLab: with no status declared for the reason, the issue just closes and loses its status label.
@@ -574,7 +575,7 @@ cmd_issue_close() {
     while [ $# -gt 0 ]; do
         case $1 in
             -r | --reason) board_arg "$@"; opt_reason=$2; shift 2 ;;
-            --from) board_arg "$@"; opt_from=$2; shift 2 ;;
+            --from) board_arg "$@"; [ -n "$2" ] || board_usage_die "--from must not be empty"; opt_from=$2; shift 2 ;;
             -*) board_unknown_flag "$1" ;;
             *)
                 [ -z "$arg_id" ] || board_unexpected "$1"
@@ -615,6 +616,9 @@ OUTPUT
   Text: the URL of the issue.
   JSON: $ISSUE_SHAPE
 
+PLATFORM NOTES
+  GitHub, GitLab: an issue with no status never matches --from.
+
 EXAMPLES
   board issue reopen KAN-1
   board issue reopen 12 --status "In Progress"
@@ -626,7 +630,7 @@ cmd_issue_reopen() {
     while [ $# -gt 0 ]; do
         case $1 in
             -s | --status) board_arg "$@"; opt_status=$2; shift 2 ;;
-            --from) board_arg "$@"; opt_from=$2; shift 2 ;;
+            --from) board_arg "$@"; [ -n "$2" ] || board_usage_die "--from must not be empty"; opt_from=$2; shift 2 ;;
             -*) board_unknown_flag "$1" ;;
             *)
                 [ -z "$arg_id" ] || board_unexpected "$1"
@@ -670,13 +674,14 @@ OUTPUT
   null for automation with no person behind it. Timestamps are UTC.
 
 PLATFORM NOTES
-  Linear: from the issue's history.
   Jira: from the changelog. A status renamed since keeps its old name in a move.
   GitHub: from the Status changes of the item in this project; other projects are left out. The
-          project's built-in workflows show as github-project-automation. A draft records no
-          changes: moves is [] and since is when Status was last set.
+          project's built-in workflows show as github-project-automation. With no moves, since is
+          when Status was last set, not created_at. A draft records no changes: moves is [].
+  Linear: changes made in the first minutes after creating an issue are folded into its creation
+          and do not show: since is then created_at.
   GitLab: rebuilt from label and open/closed events by the rule of 'board issue view', so a closed
-          issue reads done. Changes within a second count as one move. A label deleted since is
+          issue reads done. Changes less than a second apart count as one move. A label deleted since is
           not seen.
 
 EXAMPLES
@@ -711,7 +716,7 @@ ARGUMENTS
   <id>        The issue, as the board shows it
 
 FLAGS
-  -y, --yes   Really delete it
+  -y, --yes   Really delete it. A --dry-run needs none
 
 OUTPUT
   Text: nothing.
@@ -741,7 +746,7 @@ cmd_issue_delete() {
         esac
     done
     board_require_id "$arg_id"
-    [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
+    [ -n "$opt_yes" ] || board_dry_run || board_usage_die "deleting needs --yes"
     board_doc=$(board_call issue_delete "$arg_id") || board_fail "$?" "$board_doc"
     if board_dry_run; then
         printf '%s\n' "$board_doc" | board_output text_plan
@@ -918,7 +923,7 @@ ARGUMENTS
   <comment-id>    The comment, as 'board issue comment list' shows it
 
 FLAGS
-  -y, --yes       Really delete it
+  -y, --yes       Really delete it. A --dry-run needs none
 
 OUTPUT
   Text: nothing.
@@ -949,7 +954,7 @@ cmd_issue_comment_delete() {
     done
     board_require_id "$arg_id"
     board_require_id "$arg_comment"
-    [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
+    [ -n "$opt_yes" ] || board_dry_run || board_usage_die "deleting needs --yes"
     board_doc=$(board_call issue_comment_delete "$arg_id" "$arg_comment") || board_fail "$?" "$board_doc"
     if board_dry_run; then
         printf '%s\n' "$board_doc" | board_output text_plan

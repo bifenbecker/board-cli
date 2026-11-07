@@ -90,7 +90,7 @@ Sections other than `[board]` are not read. Secrets never go here.
 
 | Command                          | What it does                                               |
 | -------------------------------- | ---------------------------------------------------------- |
-| `board issue ...`                | list, view, create, edit, move, close, reopen, delete      |
+| `board issue ...`                | list, view, history, create, edit, move, close, reopen, delete |
 | `board issue comment ...`        | list, add, edit, delete                                    |
 | `board issue link ...`           | list, add, remove                                          |
 | `board status ...`               | list, add, rename, delete                                  |
@@ -100,10 +100,14 @@ Sections other than `[board]` are not read. Secrets never go here.
 | `board milestone ...`            | list, view, create, edit, delete                           |
 | `board init`, `view`, `list`     | declare the board, show it, list reachable ones            |
 | `board doctor`, `capabilities`   | is it working, and what can this board do                  |
+| `board batch`                    | several commands from stdin, one result each               |
 | `board api`                      | the board's own API, for what no command covers            |
 
 `board <command> --help` gives the exact flags, the JSON shape and how each board differs. That help
 is the documentation.
+
+`--dry-run` on any command that writes prints what it would do and changes nothing. `--from
+<status>` on `issue move`, `close` and `reopen` acts only if the issue is still where you saw it.
 
 ## Output
 
@@ -135,6 +139,7 @@ is `null` or an empty list, never a missing key. Text output is for people and m
 | 4    | Not found                                                                       |
 | 5    | Not authenticated, or not allowed                                               |
 | 6    | Partial: a write went through and a later step failed. The id is on stdout      |
+| 7    | Conflict: the issue is not in the `--from` status. Nothing was written          |
 
 ## For agents
 

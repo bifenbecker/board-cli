@@ -41,9 +41,11 @@ COMMANDS
 
 CHANGING SAFELY
   --dry-run on a command that writes changes nothing and prints the plan instead:
-  {dry_run, command, args, intent, issue, status}. It reads what it needs: the issue as it is now,
-  and for move, reopen and --status the status it would reach, which must exist. It does not check
-  what only the write finds out: an assignee name, a type, a parent rule, a Jira transition.
+  {dry_run, command, args, intent, issue, status}. args are the ids and names the write takes,
+  intent its fields. It reads what it needs: the issue as it is now, and for move, close, reopen
+  and --status the status it would reach; a status named must exist, and status is null when no
+  status has the category. A delete needs no --yes for it. It does not check what only the write
+  finds out: an assignee name, a type, a parent rule, a Jira transition.
   --from <status> on move, close and reopen acts only from the status you saw: exit 7 means the
   issue moved since. It is a read and then a write, not a lock.
   'board batch' runs many commands in one call and reports each: exit 6 means some went through.

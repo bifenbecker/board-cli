@@ -2544,3 +2544,11 @@ test_history_on_data_center_expands_the_issue() {
     t_lacks "$(cat "$FAKE_LOG")" changelog?
     t_contains "$(cat "$FAKE_LOG")" expand=changelog
 }
+
+test_dry_run_label_sync_is_not_supported_as_the_sync_is_not() {
+    cloud_board
+    printf '\n[board.labels]\nbug = "Broken"\n' >>"$WORKFLOW_FILE"
+    printf '{"startAt":0,"maxResults":1000,"total":0,"isLast":true,"values":[]}' | ans GET_rest_api_2_label
+    t_run board label sync --dry-run
+    t_status 3
+}

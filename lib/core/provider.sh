@@ -95,14 +95,24 @@ board_plan() {
     esac
     case $board_pn_name in
         issue_move) board_pn_status=$(board_plan_status name "$2") || return $? ;;
+        # An issue already open, or already closed for this reason, stays where it is.
         issue_reopen)
+            board_pn_now=$(_jq -r '.status.category // ""' <"$BOARD_TMP/plan.issue")
             if [ -n "${2:-}" ]; then
                 board_pn_status=$(board_plan_status name "$2") || return $?
+            elif [ "$board_pn_now" != done ] && [ "$board_pn_now" != canceled ]; then
+                board_pn_status=$(_jq -c .status <"$BOARD_TMP/plan.issue")
             else
                 board_pn_status=$(board_plan_status category todo) || return $?
             fi
             ;;
-        issue_close) board_pn_status=$(board_plan_status category "$2") || return $? ;;
+        issue_close)
+            if [ "$(_jq -r '.status.category // ""' <"$BOARD_TMP/plan.issue")" = "$2" ]; then
+                board_pn_status=$(_jq -c .status <"$BOARD_TMP/plan.issue")
+            else
+                board_pn_status=$(board_plan_status category "$2") || return $?
+            fi
+            ;;
         issue_edit | issue_create)
             board_pn_want=$(_jq -r '.status // ""' <"$BOARD_TMP/plan.intent")
             board_pn_status=null

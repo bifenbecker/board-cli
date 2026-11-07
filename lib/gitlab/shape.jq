@@ -120,16 +120,16 @@ def gl_status_of($cfg; $labels; $closed):
 
 # Input: {labels: resource label events, states: resource state events}. GitLab keeps no status,
 # so it is replayed: the events are taken in order, and those within a second of each other are
-# one change, since one call writes several. A move is each change of the status they give.
+# one change, since one call writes several about 150 ms apart. A move is each change of the status they give.
 def gl_moves($cfg):
-    def secs: .[0:19] + "Z" | fromdateiso8601;
+    def secs: (.[0:19] + "Z" | fromdateiso8601) + ((.[19:] | capture("^\\.(?<f>\\d+)") | ("0." + .f | tonumber)) // 0);
     ([.labels[] | select(.label.name != null)
       | {at: .created_at, user, add: (if .action == "add" then .label.name else null end),
          remove: (if .action == "remove" then .label.name else null end)}]
      + [.states[] | {at: .created_at, user, closed: (.state == "closed")}])
     | sort_by(.at)
     | reduce .[] as $e ([];
-          if length > 0 and (($e.at | secs) - (.[-1][0].at | secs)) <= 1 then .[-1] += [$e] else . + [[$e]] end)
+          if length > 0 and (($e.at | secs) - (.[-1][0].at | secs)) < 1 then .[-1] += [$e] else . + [[$e]] end)
     | reduce .[] as $group ({labels: [], closed: false, status: {name: null, category: "todo"}, moves: []};
           (reduce $group[] as $e (.;
               if $e.add then .labels += [$e.add]

@@ -414,6 +414,18 @@ test_from_needs_a_value() {
     gitlab_board
     t_run board issue move 1 done --from
     t_status 2
+    t_run board issue move 1 done --from ''
+    t_status 2
+    t_contains "$T_ERR" '--from must not be empty'
+}
+
+test_dry_run_reopen_of_an_open_issue_stays_where_it_is() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue reopen 1 --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.status' '{"name":"alpha","category":"in_progress"}'
+    gl_no_write
 }
 
 # --dry-run is the core's too: no adapter write may run, so the log holds reads only.
@@ -495,7 +507,7 @@ test_dry_run_create_carries_the_intent() {
 test_dry_run_deletes_print_a_plan() {
     gitlab_board
     gl_issue '["zeta"]'
-    t_run board issue delete 1 --yes --dry-run --json
+    t_run board issue delete 1 --dry-run --json
     t_status 0
     t_jq "$T_OUT" '.dry_run' true
     t_jq "$T_OUT" '.issue.id' '"1"'
@@ -529,7 +541,8 @@ test_dry_run_text_says_nothing_changed() {
     gl_issue '["zeta"]'
     t_run board issue move 1 alpha --dry-run
     t_status 0
-    t_contains "$T_OUT" 'dry run: board issue move 1 alpha'
+    t_contains "$T_OUT" 'dry run: board issue move'
+    t_contains "$T_OUT" 'args:   1 alpha'
     t_contains "$T_OUT" 'status: alpha (in_progress)'
     t_contains "$T_OUT" 'nothing was changed'
 }
