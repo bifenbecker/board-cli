@@ -80,6 +80,8 @@ lib/<kind>/unsupported.txt  <name> <reason>, for a call this board cannot do
   set. The contract tests compare it with `lib/schema/`.
 - Names are compared with `ieq`, the only comparison that handles Cyrillic and regex characters.
 - Live facts that shaped the code go in [providers.md](providers.md).
+- `--dry-run` stops every write in `board_call`, before its adapter: an adapter needs nothing for
+  it. What a dry run can check is what the core can read: the issue, and the status a move reaches.
 
 ## Output
 
@@ -90,6 +92,8 @@ lib/<kind>/unsupported.txt  <name> <reason>, for a call this board cannot do
 - A list is a plain array. When more exist than `--limit` allows, a warning goes to stderr.
 - After a change, text mode prints the URL and JSON mode prints the whole object as it now is.
 - Diagnostics go to stderr as `board: <message>`. stdout carries only the result.
+- Under `--dry-run` a write prints its plan instead, `lib/schema/plan.json`, and `board_output`
+  renders it with `text_plan` whatever filter the command passed.
 
 ## Exit codes
 
@@ -106,7 +110,8 @@ lib/<kind>/unsupported.txt  <name> <reason>, for a call this board cannot do
 
 An agent branches on these codes, so a failure is never turned into exit 0, and "nothing found" for
 one object is 4 rather than empty output. A list with nothing in it is `[]` and exit 0. A child's
-own exit code never passes through: Linear's CLI uses 3 to 5 for other meanings.
+own exit code never passes through: Linear's CLI uses 3 to 5 for other meanings. `board batch` is
+the one exception: its children are board, and their codes mean what they say here.
 
 ## Help
 
