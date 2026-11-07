@@ -76,11 +76,13 @@ def make_comment:
      created_at: (.created_at | utc),
      updated_at: (.updated_at | utc)};
 
-# Input: {from, to, at, by}. from and to are {id?, name, native?}; from is null, or has a null name,
-# where the board records no status before. by is null for automation with no person behind it.
+# Input: {from, to, at, by}. from and to are {id?, name, native?}, or {name, category} where the
+# board's own rule decided the category; from is null, or has a null name, where the board records
+# no status before. by is null for automation with no person behind it.
 def make_move($cfg):
-    {from: (if .from == null or .from.name == null then null else (.from | make_status($cfg) | {name, category}) end),
-     to: (.to | make_status($cfg) | {name, category}),
+    def status_of: if has("category") then {name, category} else make_status($cfg) | {name, category} end;
+    {from: (if .from == null or .from.name == null then null else (.from | status_of) end),
+     to: (.to | status_of),
      at: (.at | utc),
      by: (if .by == null or .by.id == null then null else (.by | make_user) end)};
 

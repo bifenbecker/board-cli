@@ -109,6 +109,39 @@ def gl_issue($cfg):
     | if $i.state == "closed" and .status.category != "done" and .status.category != "canceled"
       then .status.category = "done" else . end;
 
+# The status of labels and state by the rule of gl_issue: the first declared label, and a closed
+# issue reads done whatever label it kept.
+def gl_status_of($cfg; $labels; $closed):
+    ($labels | gl_statuses_on($cfg) | first) as $name
+    | (if $name == null then (if $closed then "done" else "todo" end)
+       else category_of($cfg; $name; null) end) as $category
+    | {name: $name,
+       category: (if $closed and $category != "done" and $category != "canceled" then "done" else $category end)};
+
+# Input: {labels: resource label events, states: resource state events}. GitLab keeps no status,
+# so it is replayed: the events are taken in order, and those within a second of each other are
+# one change, since one call writes several. A move is each change of the status they give.
+def gl_moves($cfg):
+    def secs: .[0:19] + "Z" | fromdateiso8601;
+    ([.labels[] | select(.label.name != null)
+      | {at: .created_at, user, add: (if .action == "add" then .label.name else null end),
+         remove: (if .action == "remove" then .label.name else null end)}]
+     + [.states[] | {at: .created_at, user, closed: (.state == "closed")}])
+    | sort_by(.at)
+    | reduce .[] as $e ([];
+          if length > 0 and (($e.at | secs) - (.[-1][0].at | secs)) <= 1 then .[-1] += [$e] else . + [[$e]] end)
+    | reduce .[] as $group ({labels: [], closed: false, status: {name: null, category: "todo"}, moves: []};
+          (reduce $group[] as $e (.;
+              if $e.add then .labels += [$e.add]
+              elif $e.remove then .labels -= [$e.remove]
+              elif $e.closed != null then .closed = $e.closed
+              else . end)) as $next
+          | gl_status_of($cfg; $next.labels; $next.closed) as $status
+          | if $status == .status then $next
+            else $next | .moves += [{from: .status, to: $status, at: $group[0].at, by: ($group[0].user | gl_user)}]
+                 | .status = $status end)
+    | .moves;
+
 # False for a name GitLab reads as a keyword of this filter, or splits at a comma.
 def gl_speakable($keywords):
     . as $n | (test(",") | not) and ($keywords | gl_has($n) | not);

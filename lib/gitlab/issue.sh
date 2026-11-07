@@ -35,6 +35,15 @@ gitlab_issue_view() {
     printf '%s' "$gitlab_iv_doc" | _jq -c --argjson cfg "$BOARD_CONFIG_JSON" ''"$BOARD_LIB"' gl_issue($cfg)'
 }
 
+gitlab_issue_history() {
+    gitlab_ih_issue=$(gitlab_issue_view "$1") || return $?
+    gitlab_ih_labels=$(gitlab_rest_all "$GL_ISSUES/$1/resource_label_events?per_page=100") || return $?
+    gitlab_ih_states=$(gitlab_rest_all "$GL_ISSUES/$1/resource_state_events?per_page=100") || return $?
+    printf '%s\n%s\n%s\n' "$gitlab_ih_issue" "$gitlab_ih_labels" "$gitlab_ih_states" |
+        _jq -sc --argjson cfg "$BOARD_CONFIG_JSON" ''"$BOARD_LIB"'
+            {issue: .[0], moves: ({labels: .[1], states: .[2]} | gl_moves($cfg))} | make_history($cfg)'
+}
+
 # --- list --------------------------------------------------------------------------------
 
 gitlab_list_page() {

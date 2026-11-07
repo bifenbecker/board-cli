@@ -1939,3 +1939,51 @@ test_a_status_with_quotes_in_its_name_is_quoted() {
     t_status 0
     [ ! -e PWNED ] || t_fail "a value ran as code"
 }
+
+# --- history -----------------------------------------------------------------------------
+
+# Usage: gl_label_event <at> <add|remove> <label|null>
+gl_label_event() {
+    if [ "$3" = null ]; then
+        printf '{"created_at":"%s","action":"%s","label":null,"user":{"username":"me","name":"Me"}}' "$1" "$2"
+    else
+        printf '{"created_at":"%s","action":"%s","label":{"name":"%s"},"user":{"username":"me","name":"Me"}}' "$1" "$2" "$3"
+    fi
+}
+
+# Usage: gl_history <label events JSON> <state events JSON>
+gl_history() {
+    gl_answer GET_projects_a_2Fb_issues_1_resource_label_events "$1"
+    gl_answer GET_projects_a_2Fb_issues_1_resource_state_events "$2"
+}
+
+test_history_replays_labels_and_state() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    gl_history "[$(gl_label_event 2026-11-01T10:00:00.100Z add zeta),
+        $(gl_label_event 2026-11-01T11:00:00.900Z add alpha),$(gl_label_event 2026-11-01T11:00:00.900Z remove zeta),
+        $(gl_label_event 2026-11-01T11:30:00.000Z add bug),
+        $(gl_label_event 2026-11-01T12:00:01.200Z add done),$(gl_label_event 2026-11-01T12:00:01.200Z remove alpha),
+        $(gl_label_event 2026-11-01T13:00:00.000Z add zeta),$(gl_label_event 2026-11-01T13:00:00.000Z remove done),
+        $(gl_label_event 2026-11-01T13:30:00.000Z add null)]" \
+        '[{"created_at":"2026-11-01T12:00:00.800Z","state":"closed","user":{"username":"me"}},
+          {"created_at":"2026-11-01T13:00:00.000Z","state":"reopened","user":{"username":"me"}}]'
+    t_run board issue history 1 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves | map([.from.name, .to.name, .to.category])' \
+        '[[null,"zeta","todo"],["zeta","alpha","in_progress"],["alpha","done","done"],["done","zeta","todo"]]'
+    t_jq "$T_OUT" '.moves[2].at' '"2026-11-01T12:00:00Z"'
+    t_jq "$T_OUT" '.moves[0].by' '{"id":"me","name":"Me"}'
+    t_jq "$T_OUT" '.since' '"2026-11-01T13:00:00Z"'
+}
+
+test_history_close_with_an_open_label_reads_done() {
+    gitlab_board
+    gl_issue '["alpha"]' closed
+    gl_history "[$(gl_label_event 2026-11-01T10:00:00.000Z add alpha)]" \
+        '[{"created_at":"2026-11-01T12:00:00.000Z","state":"closed","user":{"username":"me"}}]'
+    t_run board issue history 1 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves[-1].to' '{"name":"alpha","category":"done"}'
+    t_jq "$T_OUT" '.since' '"2026-11-01T12:00:00Z"'
+}
