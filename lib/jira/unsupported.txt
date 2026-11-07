@@ -4,4 +4,3 @@ status_delete statuses belong to workflows, which differ by project type and nee
 label_create a label is free text on an issue: it exists once an issue carries it
 label_edit a label is free text on each issue: there is no label object to change
 label_delete a label is free text on each issue: there is no label object to delete
-issue_history not yet implemented

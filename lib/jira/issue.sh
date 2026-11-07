@@ -30,6 +30,32 @@ jira_issue_view() {
     printf '%s' "$jira_iv_doc" | jira_normalise
 }
 
+# One page of the changelog on Cloud, as raw histories.
+jira_history_page() {
+    jira_hp_doc=$(jira_call GET "$(jira_paged_url "/rest/api/2/issue/$JIRA_HISTORY_KEY/changelog" "$1" 100)") || return $?
+    printf '%s' "$jira_hp_doc" | _jq -c '(.startAt + (.values | length)) as $next
+        | {nodes: .values, has_next: ((.values | length) > 0 and (.isLast | not)), end_cursor: $next}'
+}
+
+# Cloud pages the changelog under its own path; Data Center has it only as an expansion of the
+# issue. Chosen by the deployment, never by trying one after the other: a bad token on Cloud
+# answers 404, and a fallback would hide it.
+jira_issue_history() {
+    jira_ih_issue=$(jira_issue_view "$1") || return $?
+    if [ -n "$JIRA_CLOUD" ]; then
+        JIRA_HISTORY_KEY=$1
+        jira_ih_raw=$(board_paged jira_history_page all) || return $?
+    else
+        jira_ih_raw=$(jira_call GET "/rest/api/2/issue/$1?fields=status&expand=changelog") || return $?
+        jira_ih_raw=$(printf '%s' "$jira_ih_raw" | _jq -c '.changelog.histories // []')
+    fi
+    board_provider_load status
+    jira_ih_statuses=$(jira_status_list) || return $?
+    printf '%s\n%s\n%s\n' "$jira_ih_issue" "$jira_ih_raw" "$jira_ih_statuses" |
+        _jq -sc --argjson cfg "$BOARD_CONFIG_JSON" ''"$BOARD_LIB"'
+            .[2] as $statuses | {issue: .[0], moves: (.[1] | jira_moves($cfg; $statuses))} | make_history($cfg)'
+}
+
 # The answer that ends a write. The write is done whatever happens to this read: a plain failure
 # here would invite a second one.
 jira_final_view() {

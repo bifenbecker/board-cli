@@ -2497,3 +2497,50 @@ test_the_library_fits_in_argv() {
     size=$(cat "$BOARD_TEST_ROOT/lib/jq/common.jq" "$BOARD_TEST_ROOT"/lib/jira/*.jq | wc -c)
     [ "$size" -lt 28000 ] || t_fail "BOARD_LIB of jira is $size bytes"
 }
+
+# --- history -------------------------------------------------------------------------------
+
+jira_history_statuses() {
+    printf '[{"statuses":[{"id":"1","name":"To Do","statusCategory":{"key":"new"}},{"id":"3","name":"In Progress","statusCategory":{"key":"indeterminate"}}]}]' |
+        ans GET_rest_api_2_project_KAN_statuses
+}
+
+# Usage: jira_history_entry <created> <from id> <from name> <to id> <to name>
+jira_history_entry() {
+    printf '{"created":"%s","author":{"accountId":"a1","displayName":"A"},"items":[{"field":"labels","fieldId":"labels","fromString":"","toString":"x"},{"field":"status","fieldId":"status","from":"%s","fromString":"%s","to":"%s","toString":"%s"}]}' \
+        "$1" "$2" "$3" "$4" "$5"
+}
+
+test_history_reads_the_changelog_on_cloud_page_by_page() {
+    cloud_board
+    view_answers KAN-1
+    issue_json KAN-1 "In Progress" indeterminate | ans GET_rest_api_2_issue_KAN-1
+    jira_history_statuses
+    printf '{"startAt":0,"maxResults":1,"total":2,"isLast":false,"values":[%s]}' \
+        "$(jira_history_entry 2026-11-03T10:00:00.000+1100 1 'To Do' 9 Gone)" | ans GET_rest_api_2_issue_KAN-1_changelog.1
+    printf '{"startAt":1,"maxResults":1,"total":2,"isLast":true,"values":[%s]}' \
+        "$(jira_history_entry 2026-11-03T11:00:00.000+1100 9 Gone 3 'In Progress')" | ans GET_rest_api_2_issue_KAN-1_changelog.2
+    t_run board issue history KAN-1 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves | length' 2
+    t_jq "$T_OUT" '.moves[0].from' '{"name":"To Do","category":"todo"}'
+    t_jq "$T_OUT" '.moves[0].to' '{"name":"Gone","category":null}'
+    t_jq "$T_OUT" '.moves[1].to' '{"name":"In Progress","category":"in_progress"}'
+    t_jq "$T_OUT" '.moves[1].at' '"2026-11-03T00:00:00Z"'
+    t_jq "$T_OUT" '.since' '"2026-11-03T00:00:00Z"'
+    t_contains "$(cat "$FAKE_LOG")" 'startAt=1'
+}
+
+test_history_on_data_center_expands_the_issue() {
+    dc_board
+    view_answers KAN-1
+    issue_json KAN-1 | ans GET_rest_api_2_issue_KAN-1.1
+    printf '{"key":"KAN-1","fields":{},"changelog":{"histories":[%s]}}' \
+        "$(jira_history_entry 2026-11-03T10:00:00.000+0000 3 'In Progress' 1 'To Do')" | ans GET_rest_api_2_issue_KAN-1.2
+    jira_history_statuses
+    t_run board issue history KAN-1 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves | map(.to.name)' '["To Do"]'
+    t_lacks "$(cat "$FAKE_LOG")" changelog?
+    t_contains "$(cat "$FAKE_LOG")" expand=changelog
+}

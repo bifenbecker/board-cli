@@ -8,6 +8,17 @@ def jira_user:
 def jira_status:
     {id, name, native: ({new: "todo", indeterminate: "in_progress", done: "done"}[.statusCategory.key // ""])};
 
+# Input: changelog histories. Their status items, as make_move input. A change records ids and the
+# names of the time; the category comes from the status of that id in $statuses, the normalised
+# list of the project, or from [board.statuses] by name when the project has no such status now.
+def jira_moves($cfg; $statuses):
+    def at_id($id; $name):
+        if $name == null then null
+        else ([$statuses[] | select(.id == ($id | tostring))] | first) as $s
+             | {name: $name, category: (if $s then $s.category else category_of($cfg; $name; null) end)} end;
+    [.[] | . as $h | .items[] | select(.fieldId == "status" or .field == "status")
+     | {from: at_id(.from; .fromString), to: at_id(.to; .toString), at: $h.created, by: ($h.author | jira_user)}];
+
 # Any other name a site gave its priorities is read through [board.priority], else null.
 def jira_priority($cfg):
     . as $name
