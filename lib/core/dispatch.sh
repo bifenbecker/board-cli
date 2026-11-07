@@ -9,6 +9,7 @@ board_main() {
     BOARD_BODY=''
     BOARD_BODY_SET=''
     BOARD_SHOW_VERSION=''
+    BOARD_DRY_RUN=''
     # Inherited values would skip the steps they stand for.
     BOARD_CONFIG_LOADED=''
     BOARD_TMP=''
@@ -42,6 +43,7 @@ board_main() {
                 fi
                 ;;
             --json) BOARD_JSON=1 ;;
+            --dry-run) BOARD_DRY_RUN=1 ;;
             --jq)
                 [ "$board_n" -gt 0 ] || board_usage_die "--jq needs a value"
                 BOARD_JQ=$1 BOARD_JSON=1

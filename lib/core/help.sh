@@ -22,6 +22,7 @@ EXIT CODES
 GLOBAL FLAGS
   --json        Print the normalised JSON described under OUTPUT
   --jq <expr>   Filter that JSON with a jq expression (implies --json)
+  --dry-run     Change nothing: a command that writes prints its plan instead
   -h, --help    Show this help
 EOF
     fi

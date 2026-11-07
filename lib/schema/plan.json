@@ -1,0 +1,8 @@
+{
+  "dry_run": "boolean",
+  "command": "string",
+  "args": "array",
+  "intent": "object|array|null",
+  "issue": "object|null",
+  "status": "object|null"
+}

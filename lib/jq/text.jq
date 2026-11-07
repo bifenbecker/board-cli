@@ -13,6 +13,12 @@ def text_issue_row: "\(.id)\t\(.status.name | dash)\t\(.title | dash)";
 
 def text_issues: .[] | text_issue_row;
 
+def text_plan:
+    "dry run: board \(.command) \(.args | join(" "))",
+    (if .issue then "issue:  " + (.issue | text_issue_row) else empty end),
+    (if .status then "status: \(.status.name | dash) (\(.status.category | dash))" else empty end),
+    "nothing was changed";
+
 def text_issue:
     "\(.id)  \(.title | dash)",
     "status:     \(.status.name | dash) (\(.status.category | dash))",

@@ -416,6 +416,139 @@ test_from_needs_a_value() {
     t_status 2
 }
 
+# --dry-run is the core's too: no adapter write may run, so the log holds reads only.
+
+gl_no_write() {
+    if grep -E '(^| )(PUT|POST|DELETE)( |$)' "$FAKE_LOG" >/dev/null 2>&1; then
+        t_fail "a dry run wrote: $(cat "$FAKE_LOG")"
+    fi
+}
+
+test_dry_run_move_prints_the_plan_and_writes_nothing() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 ALPHA --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.dry_run' true
+    t_jq "$T_OUT" '.command' '"issue move"'
+    t_jq "$T_OUT" '.args' '["1","ALPHA"]'
+    t_jq "$T_OUT" '.issue.status.name' '"zeta"'
+    t_jq "$T_OUT" '.status' '{"name":"alpha","category":"in_progress"}'
+    gl_no_write
+}
+
+test_dry_run_is_found_after_the_command() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board --dry-run issue move 1 alpha --json
+    t_status 0
+    t_jq "$T_OUT" '.dry_run' true
+    gl_no_write
+}
+
+test_dry_run_move_to_an_unknown_status_is_usage() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 nope --dry-run
+    t_status 2
+    t_contains "$T_ERR" "no status 'nope'"
+    gl_no_write
+}
+
+test_dry_run_still_checks_from() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 alpha --from done --dry-run
+    t_status 7
+    gl_no_write
+}
+
+test_dry_run_of_a_missing_issue_is_not_found() {
+    gitlab_board
+    gl_refuse GET_projects_a_2Fb_issues_1 '{"message":"404 Not found"}' 'glab: 404 Not Found (HTTP 404)'
+    t_run board issue close 1 --dry-run
+    t_status 4
+    gl_no_write
+}
+
+test_dry_run_close_names_the_first_status_of_the_reason() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue close 1 --reason canceled --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.status.name' '"wontfix"'
+    gl_no_write
+}
+
+test_dry_run_create_carries_the_intent() {
+    gitlab_board
+    printf 'a body\n' >body.md
+    t_run board issue create --title t --body-file body.md --status alpha --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.intent.title' '"t"'
+    t_jq "$T_OUT" '.intent.body' '"a body"'
+    t_jq "$T_OUT" '.issue' null
+    t_jq "$T_OUT" '.status.name' '"alpha"'
+    gl_no_write
+}
+
+test_dry_run_deletes_print_a_plan() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue delete 1 --yes --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.dry_run' true
+    t_jq "$T_OUT" '.issue.id' '"1"'
+    t_run board status delete alpha --yes --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.args' '["alpha"]'
+    t_run board label delete bug --yes --dry-run
+    t_status 0
+    t_contains "$T_OUT" 'nothing was changed'
+    gl_no_write
+}
+
+test_dry_run_label_sync_lists_what_it_would_create() {
+    gitlab_board
+    printf '\n[board.labels]\nbug = "Broken"\n' >>"$WORKFLOW_FILE"
+    t_run board label sync --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.intent | map(.name)' '["bug"]'
+    gl_no_write
+}
+
+test_dry_run_api_is_refused() {
+    gitlab_board
+    t_run board api projects --dry-run
+    t_status 2
+    [ ! -s "$FAKE_LOG" ] || t_fail "the board was reached: $(cat "$FAKE_LOG")"
+}
+
+test_dry_run_text_says_nothing_changed() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 alpha --dry-run
+    t_status 0
+    t_contains "$T_OUT" 'dry run: board issue move 1 alpha'
+    t_contains "$T_OUT" 'status: alpha (in_progress)'
+    t_contains "$T_OUT" 'nothing was changed'
+}
+
+test_dry_run_jq_failure_is_usage_not_partial() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 alpha --dry-run --jq '.dry_run | error'
+    t_status 2
+}
+
+test_dry_run_leaves_reads_alone() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue view 1 --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.status.name' '"zeta"'
+}
+
 test_a_status_nothing_declares_reads_with_no_status_name() {
     gitlab_board
     gl_issue '["other"]'

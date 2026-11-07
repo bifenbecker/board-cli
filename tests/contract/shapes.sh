@@ -40,6 +40,13 @@ shape_board() {
     t_run board status list --json
     t_status 0
     shape_check status "$T_OUT" array
+    shape_status=$(printf '%s' "$T_OUT" | jq -r '.[0].name')
+
+    # A dry run reads and never writes, so recorded reads are all it needs.
+    t_run board issue move "$ISSUE" "$shape_status" --dry-run --json
+    t_status 0
+    shape_check plan "$T_OUT" object
+    t_jq "$T_OUT" ".issue.id" "\"$ISSUE\""
 
     t_run board member list --json
     t_status 0

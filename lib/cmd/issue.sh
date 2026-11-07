@@ -689,7 +689,11 @@ cmd_issue_delete() {
     done
     board_require_id "$arg_id"
     [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
-    board_call issue_delete "$arg_id" || exit $?
+    board_doc=$(board_call issue_delete "$arg_id") || board_fail "$?" "$board_doc"
+    if board_dry_run; then
+        printf '%s\n' "$board_doc" | board_output text_plan
+        return 0
+    fi
     if board_json_mode; then
         _jq -n --arg id "$arg_id" '{id: $id, deleted: true}' | board_output .
     fi
@@ -893,7 +897,11 @@ cmd_issue_comment_delete() {
     board_require_id "$arg_id"
     board_require_id "$arg_comment"
     [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
-    board_call issue_comment_delete "$arg_id" "$arg_comment" || exit $?
+    board_doc=$(board_call issue_comment_delete "$arg_id" "$arg_comment") || board_fail "$?" "$board_doc"
+    if board_dry_run; then
+        printf '%s\n' "$board_doc" | board_output text_plan
+        return 0
+    fi
     if board_json_mode; then
         _jq -n --arg id "$arg_comment" '{id: $id, deleted: true}' | board_output .
     fi
