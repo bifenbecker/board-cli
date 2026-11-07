@@ -76,6 +76,31 @@ def make_comment:
      created_at: (.created_at | utc),
      updated_at: (.updated_at | utc)};
 
+# Input: {from, to, at, by}. from and to are {id?, name, native?}, or {name, category} where the
+# board's own rule decided the category; from is null, or has a null name, where the board records
+# no status before. by is null for automation with no person behind it.
+def make_move($cfg):
+    def status_of: if has("category") then {name, category} else make_status($cfg) | {name, category} end;
+    {from: (if .from == null or .from.name == null then null else (.from | status_of) end),
+     to: (.to | status_of),
+     at: (.at | utc),
+     by: (if .by == null or .by.id == null then null else (.by | make_user) end)};
+
+# Input: {issue: <normalised issue>, moves: [<make_move input>], since?: <timestamp>}.
+# since is when the issue entered its status: the last move, when it ends there; created_at, or the
+# since the board gives, when nothing moved; else null, because a guess would be worse.
+def make_history($cfg):
+    .issue.status as $now
+    | ((.moves // []) | map(make_move($cfg)) | sort_by(.at)) as $moves
+    | ($moves | last) as $last
+    | {id: .issue.id,
+       status: $now,
+       since: (if $last == null then ((.since | utc) // .issue.created_at)
+               elif $now.name == null then (if $last.to.name == null and $last.to.category == $now.category then $last.at else null end)
+               elif ($last.to.name | ieq($now.name)) then $last.at
+               else null end),
+       moves: $moves};
+
 def make_label:
     {id: (if .id == null then null else (.id | tostring) end),
      name: .name,

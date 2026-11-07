@@ -7,6 +7,7 @@ a board cannot do exits 3. "Declared" means it needs a table in `[board.*]` of `
 | Capability                         | Linear        | Jira          | GitHub                  | GitLab                 |
 | ---------------------------------- | ------------- | ------------- | ----------------------- | ---------------------- |
 | list, view, search, my issues      | yes           | yes           | yes                     | yes                    |
+| status history                     | yes           | yes           | yes; drafts: since only | yes, declared          |
 | create, edit, delete               | yes           | yes           | yes                     | yes                    |
 | move, close, reopen                | yes           | yes           | yes, declared           | yes, declared          |
 | assignees                          | one           | one           | several                 | one; several Premium   |
@@ -31,7 +32,10 @@ a board cannot do exits 3. "Declared" means it needs a table in `[board.*]` of `
 Jira cannot change statuses or labels through a portable API: statuses belong to workflows that
 differ by project type and need an admin, and a label exists once an issue carries it.
 
-Later: sprint create and close, archive, watchers, history, external links, bulk edit.
+`--dry-run`, `--from` and `board batch` work on every board: the core builds them from the other
+commands.
+
+Later: sprint create and close, archive, watchers, external links, bulk edit.
 
 Left out on purpose: epics as their own object (use `parent` and `type`), time tracking, custom
 fields, estimates. Each exists on too few boards, or means something different on each.

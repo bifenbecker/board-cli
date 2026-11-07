@@ -1,0 +1,6 @@
+{
+  "from": "object|null",
+  "to": "object",
+  "at": "string|null",
+  "by": "object|null"
+}

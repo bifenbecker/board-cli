@@ -153,7 +153,7 @@ ARGUMENTS
   <name>       Name of the status
 
 FLAGS
-  -y, --yes    Really delete it
+  -y, --yes    Really delete it. A --dry-run needs none
 
 OUTPUT
   Text: nothing.
@@ -185,8 +185,12 @@ cmd_status_delete() {
         esac
     done
     [ -n "$arg_name" ] || board_usage_die "<name> is required"
-    [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
-    board_call status_delete "$arg_name" || exit $?
+    [ -n "$opt_yes" ] || board_dry_run || board_usage_die "deleting needs --yes"
+    board_doc=$(board_call status_delete "$arg_name") || board_fail "$?" "$board_doc"
+    if board_dry_run; then
+        printf '%s\n' "$board_doc" | board_output text_plan
+        return 0
+    fi
     if board_json_mode; then
         _jq -n --arg name "$arg_name" '{name: $name, deleted: true}' | board_output .
     fi

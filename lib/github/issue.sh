@@ -73,6 +73,33 @@ github_issue_view() {
     printf '%s' "$github_iv_doc" | github_normalise
 }
 
+# One page of the Status changes of GH_ID_REPO#GH_ID_NUMBER, kept to this project.
+github_history_page() {
+    github_hp_doc=$(_jq -nc --arg repo "$GH_ID_REPO" --argjson number "$GH_ID_NUMBER" --arg after "$1" \
+        '{owner: ($repo | split("/")[0]), name: ($repo | split("/")[1]), number: $number,
+          after: (if $after == "" then null else $after end)}' | github_query IssueHistory) || return $?
+    printf '%s' "$github_hp_doc" | _jq -c --argjson number "$GH_NUMBER" --arg owner "$GH_OWNER" '
+        '"$BOARD_LIB"'
+        .repository.issue.timelineItems
+        | {nodes: (.nodes | gh_moves($number; $owner)), has_next: .pageInfo.hasNextPage, end_cursor: .pageInfo.endCursor}'
+}
+
+# A draft has no timeline: its moves are [] and since is when Status was last set.
+github_issue_history() {
+    github_ih_raw=$(github_fetch "$1") || return $?
+    github_ids "$github_ih_raw" "$1"
+    github_ih_issue=$(printf '%s' "$github_ih_raw" | github_normalise) || return $?
+    github_ih_moves='[]'
+    if [ -z "$GH_IS_DRAFT" ]; then
+        github_ih_moves=$(board_paged github_history_page all) || return $?
+    fi
+    github_ih_since=$(printf '%s' "$github_ih_raw" | _jq -c --argjson number "$GH_NUMBER" --arg owner "$GH_OWNER" '
+        '"$BOARD_LIB"'
+        (if .item then .item else (.issue.projectItems.nodes | gh_our_item($number; $owner)) end) | .status.updatedAt // null')
+    printf '%s\n%s\n%s\n' "$github_ih_issue" "$github_ih_moves" "$github_ih_since" |
+        _jq -sc --argjson cfg "$BOARD_CONFIG_JSON" ''"$BOARD_LIB"' {issue: .[0], moves: .[1], since: .[2]} | make_history($cfg)'
+}
+
 # The node id of an issue that can be a parent or a link. A draft has neither.
 github_node_of() {
     github_no_doc=$(github_fetch "$1") || return $?

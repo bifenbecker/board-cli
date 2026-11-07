@@ -39,6 +39,22 @@ linear_issue_view() {
     printf '%s' "$linear_iv_doc" | linear_normalise
 }
 
+# One page of the history of LN_HISTORY_ID: only the entries that change the state.
+linear_history_page() {
+    linear_hp_doc=$(_jq -nc --arg id "$LN_HISTORY_ID" --arg after "$1" \
+        '{id: $id, after: (if $after == "" then null else $after end)}' | linear_query IssueHistory) || return $?
+    printf '%s' "$linear_hp_doc" | _jq -c ''"$BOARD_LIB"' .issue.history
+        | {nodes: (.nodes | ln_moves), has_next: .pageInfo.hasNextPage, end_cursor: .pageInfo.endCursor}'
+}
+
+linear_issue_history() {
+    linear_ih_issue=$(linear_issue_view "$1") || return $?
+    LN_HISTORY_ID=$1
+    linear_ih_moves=$(board_paged linear_history_page all) || return $?
+    printf '%s\n%s\n' "$linear_ih_issue" "$linear_ih_moves" |
+        _jq -sc --argjson cfg "$BOARD_CONFIG_JSON" ''"$BOARD_LIB"' {issue: .[0], moves: .[1]} | make_history($cfg)'
+}
+
 # The answer that ends a write. Linear can go on showing the old issue for some seconds after it
 # reported success, so this reads until the test holds, for LN_SETTLE_SECONDS however long each read
 # takes. A failed read is one more try: the write is done whatever happens here.

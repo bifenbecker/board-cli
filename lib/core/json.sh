@@ -4,10 +4,14 @@ board_json_mode() {
     [ -n "${BOARD_JSON:-}" ]
 }
 
+board_dry_run() {
+    [ -n "${BOARD_DRY_RUN:-}" ]
+}
+
 # True when this command changes the board. Its result must not read as a failure to repeat.
 board_path_writes() {
     case " $BOARD_PATH " in
-        *' create '* | *' edit '* | *' move '* | *' close '* | *' reopen '* | *' add '* | *' remove '* | *' rename '* | *' sync '* | *' init '*) return 0 ;;
+        *' create '* | *' edit '* | *' move '* | *' close '* | *' reopen '* | *' add '* | *' remove '* | *' rename '* | *' delete '* | *' sync '* | *' init '*) return 0 ;;
     esac
     return 1
 }
@@ -18,10 +22,14 @@ board_path_writes() {
 board_output() {
     board_o_doc=$(cat)
     [ -n "$board_o_doc" ] || board_die "the board gave no answer"
+    # A write under --dry-run hands back its plan in place of the result.
+    case $board_o_doc in
+        '{"dry_run":true'*) set -- text_plan ;;
+    esac
     if [ -n "${BOARD_JQ:-}" ]; then
         printf '%s\n' "$board_o_doc" | _jq -r "($BOARD_JQ
 )" && return 0
-        if board_path_writes; then
+        if ! board_dry_run && board_path_writes; then
             printf '%s\n' "$board_o_doc"
             board_warn "partial: it went through, but --jq failed on the answer. The whole answer is above"
             exit "$BOARD_EXIT_PARTIAL"

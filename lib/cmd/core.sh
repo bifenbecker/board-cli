@@ -19,12 +19,14 @@ START HERE
   documentation: read it instead of guessing a flag.
 
 COMMANDS
-  issue        Issues: list, view, create, edit, move, close, reopen, delete, comment, link
+  issue        Issues: list, view, history, create, edit, move, close, reopen, delete, comment,
+               link
   status       Statuses of the board: list, add, rename, delete
   label        Labels: list, create, edit, delete, sync
   member       People who can be assigned
   sprint       Sprints and cycles: list, view, current
   milestone    Milestones and versions: list, view, create, edit, delete
+  batch        Run several commands from stdin, one result each
 
   init         Declare the board of this project from its URL
   list         Boards reachable with the current login
@@ -36,6 +38,17 @@ COMMANDS
   api          Call the board's own API
   version      Print the version
   self         Update or remove board
+
+CHANGING SAFELY
+  --dry-run on a command that writes changes nothing and prints the plan instead:
+  {dry_run, command, args, intent, issue, status}. args are the ids and names the write takes,
+  intent its fields. It reads what it needs: the issue as it is now, and for move, close, reopen
+  and --status the status it would reach; a status named must exist, and status is null when no
+  status has the category. A delete needs no --yes for it. It does not check what only the write
+  finds out: an assignee name, a type, a parent rule, a Jira transition.
+  --from <status> on move, close and reopen acts only from the status you saw: exit 7 means the
+  issue moved since. It is a read and then a write, not a lock.
+  'board batch' runs many commands in one call and reports each: exit 6 means some went through.
 
 WORKING WITH THE OUTPUT
   Act on results through --json or --jq <expr>: the keys and types are the same on every board,
@@ -53,6 +66,8 @@ EXIT CODES
   5  not authenticated, or the token may not do this. Ask the user to log in; do not retry
   6  partial: a write went through and a later step failed. The id is on stdout.
      Do not repeat the write. Finish with 'board issue edit' or 'board issue move'
+  7  conflict: the issue is no longer in the --from status, so nothing was written.
+     Read it again and decide; do not repeat the command blindly
 
 WHEN A COMMAND IS NOT ENOUGH
   Use 'board api' for what no command covers. It speaks the board's own API, so what it prints
@@ -60,7 +75,7 @@ WHEN A COMMAND IS NOT ENOUGH
 
 THE USER DECIDES
   Deleting issues, statuses and labels, and any other step that cannot be undone. Do not run
-  these unless the user asked.
+  these unless the user asked. Show the plan with --dry-run first.
 
 Run 'board <command> --help' for details.
 EOF
@@ -490,6 +505,7 @@ EOF
 
 cmd_api() {
     [ $# -gt 0 ] || board_usage_die "<args...> are required"
+    ! board_dry_run || board_usage_die "--dry-run is not available for board api: it cannot tell a read from a write"
     if [ -n "${BOARD_JQ:-}" ]; then
         board_doc=$(board_call api_call "$@") || board_fail "$?" "$board_doc"
         printf '%s\n' "$board_doc" | board_output .
@@ -548,6 +564,7 @@ EOF
 }
 
 cmd_self_update() {
+    ! board_dry_run || board_usage_die "--dry-run is not available for board self"
     opt_version=''
     while [ $# -gt 0 ]; do
         case $1 in
@@ -587,6 +604,7 @@ EOF
 
 cmd_self_uninstall() {
     [ $# -eq 0 ] || board_unexpected "$1"
+    ! board_dry_run || board_usage_die "--dry-run is not available for board self"
     board_su_prefix=$(board_self_prefix)
     sh "$BOARD_HOME/install.sh" --prefix "$board_su_prefix" --uninstall
 }

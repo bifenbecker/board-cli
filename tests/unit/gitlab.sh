@@ -362,6 +362,206 @@ test_reopen_leaves_an_open_issue_alone() {
     t_lacks "$(cat "$FAKE_LOG")" PUT
 }
 
+# --from is the core's, before any adapter write: GitLab's fake needs the fewest answers.
+
+test_move_from_another_status_is_a_conflict_and_writes_nothing() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue move 1 done --from zeta
+    t_status 7
+    t_contains "$T_ERR" "1 is in 'alpha', not 'zeta': nothing written"
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+}
+
+test_move_from_the_current_status_ignores_case() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue move 1 done --from ALPHA --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" PUT
+}
+
+test_move_from_a_status_nobody_has_is_usage() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue move 1 done --from nope
+    t_status 2
+    t_contains "$T_ERR" "no status 'nope'. Valid: zeta, alpha, done, wontfix"
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+}
+
+test_move_from_with_no_status_label_never_matches() {
+    gitlab_board
+    gl_issue '[]'
+    t_run board issue move 1 done --from zeta
+    t_status 7
+    t_contains "$T_ERR" "'no status'"
+}
+
+test_close_and_reopen_check_from() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue close 1 --from zeta
+    t_status 7
+    t_run board issue reopen 1 --status zeta --from zeta
+    t_status 7
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+    t_run board issue close 1 --from alpha --json
+    t_status 0
+}
+
+test_from_needs_a_value() {
+    gitlab_board
+    t_run board issue move 1 done --from
+    t_status 2
+    t_run board issue move 1 done --from ''
+    t_status 2
+    t_contains "$T_ERR" '--from must not be empty'
+}
+
+test_dry_run_reopen_of_an_open_issue_stays_where_it_is() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue reopen 1 --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.status' '{"name":"alpha","category":"in_progress"}'
+    gl_no_write
+}
+
+# --dry-run is the core's too: no adapter write may run, so the log holds reads only.
+
+gl_no_write() {
+    if grep -E '(^| )(PUT|POST|DELETE)( |$)' "$FAKE_LOG" >/dev/null 2>&1; then
+        t_fail "a dry run wrote: $(cat "$FAKE_LOG")"
+    fi
+}
+
+test_dry_run_move_prints_the_plan_and_writes_nothing() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 ALPHA --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.dry_run' true
+    t_jq "$T_OUT" '.command' '"issue move"'
+    t_jq "$T_OUT" '.args' '["1","ALPHA"]'
+    t_jq "$T_OUT" '.issue.status.name' '"zeta"'
+    t_jq "$T_OUT" '.status' '{"name":"alpha","category":"in_progress"}'
+    gl_no_write
+}
+
+test_dry_run_is_found_after_the_command() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board --dry-run issue move 1 alpha --json
+    t_status 0
+    t_jq "$T_OUT" '.dry_run' true
+    gl_no_write
+}
+
+test_dry_run_move_to_an_unknown_status_is_usage() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 nope --dry-run
+    t_status 2
+    t_contains "$T_ERR" "no status 'nope'"
+    gl_no_write
+}
+
+test_dry_run_still_checks_from() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 alpha --from done --dry-run
+    t_status 7
+    gl_no_write
+}
+
+test_dry_run_of_a_missing_issue_is_not_found() {
+    gitlab_board
+    gl_refuse GET_projects_a_2Fb_issues_1 '{"message":"404 Not found"}' 'glab: 404 Not Found (HTTP 404)'
+    t_run board issue close 1 --dry-run
+    t_status 4
+    gl_no_write
+}
+
+test_dry_run_close_names_the_first_status_of_the_reason() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue close 1 --reason canceled --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.status.name' '"wontfix"'
+    gl_no_write
+}
+
+test_dry_run_create_carries_the_intent() {
+    gitlab_board
+    printf 'a body\n' >body.md
+    t_run board issue create --title t --body-file body.md --status alpha --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.intent.title' '"t"'
+    t_jq "$T_OUT" '.intent.body' '"a body"'
+    t_jq "$T_OUT" '.issue' null
+    t_jq "$T_OUT" '.status.name' '"alpha"'
+    gl_no_write
+}
+
+test_dry_run_deletes_print_a_plan() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue delete 1 --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.dry_run' true
+    t_jq "$T_OUT" '.issue.id' '"1"'
+    t_run board status delete alpha --yes --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.args' '["alpha"]'
+    t_run board label delete bug --yes --dry-run
+    t_status 0
+    t_contains "$T_OUT" 'nothing was changed'
+    gl_no_write
+}
+
+test_dry_run_label_sync_lists_what_it_would_create() {
+    gitlab_board
+    printf '\n[board.labels]\nbug = "Broken"\n' >>"$WORKFLOW_FILE"
+    t_run board label sync --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.intent | map(.name)' '["bug"]'
+    gl_no_write
+}
+
+test_dry_run_api_is_refused() {
+    gitlab_board
+    t_run board api projects --dry-run
+    t_status 2
+    [ ! -s "$FAKE_LOG" ] || t_fail "the board was reached: $(cat "$FAKE_LOG")"
+}
+
+test_dry_run_text_says_nothing_changed() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 alpha --dry-run
+    t_status 0
+    t_contains "$T_OUT" 'dry run: board issue move'
+    t_contains "$T_OUT" 'args:   1 alpha'
+    t_contains "$T_OUT" 'status: alpha (in_progress)'
+    t_contains "$T_OUT" 'nothing was changed'
+}
+
+test_dry_run_jq_failure_is_usage_not_partial() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue move 1 alpha --dry-run --jq '.dry_run | error'
+    t_status 2
+}
+
+test_dry_run_leaves_reads_alone() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    t_run board issue view 1 --dry-run --json
+    t_status 0
+    t_jq "$T_OUT" '.status.name' '"zeta"'
+}
+
 test_a_status_nothing_declares_reads_with_no_status_name() {
     gitlab_board
     gl_issue '["other"]'
@@ -1751,4 +1951,52 @@ test_a_status_with_quotes_in_its_name_is_quoted() {
     t_run board issue list --assignee "a'; touch PWNED; '" --search "x'y" --json
     t_status 0
     [ ! -e PWNED ] || t_fail "a value ran as code"
+}
+
+# --- history -----------------------------------------------------------------------------
+
+# Usage: gl_label_event <at> <add|remove> <label|null>
+gl_label_event() {
+    if [ "$3" = null ]; then
+        printf '{"created_at":"%s","action":"%s","label":null,"user":{"username":"me","name":"Me"}}' "$1" "$2"
+    else
+        printf '{"created_at":"%s","action":"%s","label":{"name":"%s"},"user":{"username":"me","name":"Me"}}' "$1" "$2" "$3"
+    fi
+}
+
+# Usage: gl_history <label events JSON> <state events JSON>
+gl_history() {
+    gl_answer GET_projects_a_2Fb_issues_1_resource_label_events "$1"
+    gl_answer GET_projects_a_2Fb_issues_1_resource_state_events "$2"
+}
+
+test_history_replays_labels_and_state() {
+    gitlab_board
+    gl_issue '["zeta"]'
+    gl_history "[$(gl_label_event 2026-11-01T10:00:00.100Z add zeta),
+        $(gl_label_event 2026-11-01T11:00:00.900Z add alpha),$(gl_label_event 2026-11-01T11:00:00.900Z remove zeta),
+        $(gl_label_event 2026-11-01T11:30:00.000Z add bug),
+        $(gl_label_event 2026-11-01T12:00:01.200Z add done),$(gl_label_event 2026-11-01T12:00:01.200Z remove alpha),
+        $(gl_label_event 2026-11-01T13:00:00.000Z add zeta),$(gl_label_event 2026-11-01T13:00:00.000Z remove done),
+        $(gl_label_event 2026-11-01T13:30:00.000Z add null)]" \
+        '[{"created_at":"2026-11-01T12:00:00.800Z","state":"closed","user":{"username":"me"}},
+          {"created_at":"2026-11-01T13:00:00.000Z","state":"reopened","user":{"username":"me"}}]'
+    t_run board issue history 1 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves | map([.from.name, .to.name, .to.category])' \
+        '[[null,"zeta","todo"],["zeta","alpha","in_progress"],["alpha","done","done"],["done","zeta","todo"]]'
+    t_jq "$T_OUT" '.moves[2].at' '"2026-11-01T12:00:00Z"'
+    t_jq "$T_OUT" '.moves[0].by' '{"id":"me","name":"Me"}'
+    t_jq "$T_OUT" '.since' '"2026-11-01T13:00:00Z"'
+}
+
+test_history_close_with_an_open_label_reads_done() {
+    gitlab_board
+    gl_issue '["alpha"]' closed
+    gl_history "[$(gl_label_event 2026-11-01T10:00:00.000Z add alpha)]" \
+        '[{"created_at":"2026-11-01T12:00:00.000Z","state":"closed","user":{"username":"me"}}]'
+    t_run board issue history 1 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves[-1].to' '{"name":"alpha","category":"done"}'
+    t_jq "$T_OUT" '.since' '"2026-11-01T12:00:00Z"'
 }

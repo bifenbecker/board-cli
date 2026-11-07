@@ -65,7 +65,87 @@ board_call() {
         board_warn "board ${BOARD_PATH:-$board_call_name} is not supported on $BOARD_KIND${board_call_why:+: $board_call_why}"
         exit "$BOARD_EXIT_UNSUPPORTED"
     fi
+    if [ -n "$BOARD_WRITE" ] && board_dry_run; then
+        board_plan "$board_call_name" "$@"
+        return $?
+    fi
     "${BOARD_KIND}_$board_call_name" "$@"
+}
+
+# What a write would do, read and checked as far as the core can without writing:
+# {dry_run, command, args, intent, issue, status}. Intent and issue go through stdin: a body can
+# be longer than argv allows, and a native jq cannot open a temporary path.
+# Usage: board_plan <name> [args...]
+board_plan() {
+    board_pn_name=$1
+    shift
+    case $board_pn_name in
+        issue_create | issue_edit | issue_comment_add | issue_comment_edit | label_create | label_edit | label_sync | milestone_create | milestone_edit)
+            _jq -c . >"$BOARD_TMP/plan.intent" || board_usage_die "the intent is not JSON"
+            ;;
+        *) printf 'null\n' >"$BOARD_TMP/plan.intent" ;;
+    esac
+    case $board_pn_name in
+        issue_create | issue_list) printf 'null\n' >"$BOARD_TMP/plan.issue" ;;
+        issue_*)
+            board_pn_issue=$(board_call issue_view "$1") || return $?
+            printf '%s\n' "$board_pn_issue" >"$BOARD_TMP/plan.issue"
+            ;;
+        *) printf 'null\n' >"$BOARD_TMP/plan.issue" ;;
+    esac
+    case $board_pn_name in
+        issue_move) board_pn_status=$(board_plan_status name "$2") || return $? ;;
+        # An issue already open, or already closed for this reason, stays where it is.
+        issue_reopen)
+            board_pn_now=$(_jq -r '.status.category // ""' <"$BOARD_TMP/plan.issue")
+            if [ -n "${2:-}" ]; then
+                board_pn_status=$(board_plan_status name "$2") || return $?
+            elif [ "$board_pn_now" != done ] && [ "$board_pn_now" != canceled ]; then
+                board_pn_status=$(_jq -c .status <"$BOARD_TMP/plan.issue")
+            else
+                board_pn_status=$(board_plan_status category todo) || return $?
+            fi
+            ;;
+        issue_close)
+            if [ "$(_jq -r '.status.category // ""' <"$BOARD_TMP/plan.issue")" = "$2" ]; then
+                board_pn_status=$(_jq -c .status <"$BOARD_TMP/plan.issue")
+            else
+                board_pn_status=$(board_plan_status category "$2") || return $?
+            fi
+            ;;
+        issue_edit | issue_create)
+            board_pn_want=$(_jq -r '.status // ""' <"$BOARD_TMP/plan.intent")
+            board_pn_status=null
+            if [ -n "$board_pn_want" ]; then
+                board_pn_status=$(board_plan_status name "$board_pn_want") || return $?
+            fi
+            ;;
+        *) board_pn_status=null ;;
+    esac
+    printf '%s\n' "$board_pn_status" >"$BOARD_TMP/plan.status"
+    cat "$BOARD_TMP/plan.intent" "$BOARD_TMP/plan.issue" "$BOARD_TMP/plan.status" |
+        _jq -sc --arg command "${BOARD_PATH:-$board_pn_name}" \
+            '{dry_run: true, command: $command, args: $ARGS.positional, intent: .[0], issue: .[1],
+              status: .[2]}' --args "$@"
+}
+
+# The status a write would reach, as {name, category}, or null. By name, it must be there: a name
+# nothing has is exit 2, as the write would be, and so is one that two statuses share. By
+# category, the first of it, or null when there is none.
+# Usage: board_plan_status name|category <value>
+board_plan_status() {
+    board_ps_list=$(board_call status_list) || return $?
+    if [ "$1" = category ]; then
+        printf '%s' "$board_ps_list" | _jq -c --arg c "$2" '[.[] | select(.category == $c) | {name, category}] | first // null'
+        return 0
+    fi
+    board_ps_found=$(printf '%s' "$board_ps_list" | _jq -c --arg s "$2" 'include "jq/common";
+        [.[] | select(.id == $s or (.name | ieq($s))) | {name, category}]')
+    case $board_ps_found in
+        '[]') board_usage_die "no status '$2'. Valid: $(printf '%s' "$board_ps_list" | _jq -r '[.[].name] | join(", ")')" ;;
+        '[{'*'},{'*) board_usage_die "'$2' names more than one status: pass its id from 'board status list --json'" ;;
+    esac
+    printf '%s' "$board_ps_found" | _jq -c '.[0]'
 }
 
 # Which board a URL belongs to, or nothing when its host does not say.

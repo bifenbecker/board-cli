@@ -182,7 +182,7 @@ ARGUMENTS
   <name>       Name of the label
 
 FLAGS
-  -y, --yes    Really delete it
+  -y, --yes    Really delete it. A --dry-run needs none
 
 OUTPUT
   Text: nothing.
@@ -210,8 +210,12 @@ cmd_label_delete() {
         esac
     done
     [ -n "$arg_name" ] || board_usage_die "<name> is required"
-    [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
-    board_call label_delete "$arg_name" || exit $?
+    [ -n "$opt_yes" ] || board_dry_run || board_usage_die "deleting needs --yes"
+    board_doc=$(board_call label_delete "$arg_name") || board_fail "$?" "$board_doc"
+    if board_dry_run; then
+        printf '%s\n' "$board_doc" | board_output text_plan
+        return 0
+    fi
     if board_json_mode; then
         _jq -n --arg name "$arg_name" '{name: $name, deleted: true}' | board_output .
     fi
@@ -252,6 +256,15 @@ cmd_label_sync() {
         | (.[0].labels // {}) | to_entries
         | map(select(.key as $k | $have | any(ieq($k)) | not))
         | map({name: .key, new_name: null, color: null, description: (.value | tostring)})')
+    # One plan for the whole sync: its intent is every label it would create.
+    if board_dry_run; then
+        # board_call is skipped here, and with it the check that this board can create labels.
+        if [ "$board_ls_wanted" != '[]' ] && [ -n "$(board_unsupported_reason label_create)" ]; then
+            board_unsupported "board label sync"
+        fi
+        printf '%s' "$board_ls_wanted" | board_plan label_sync | board_output text_plan
+        return 0
+    fi
     board_ls_created=$(printf '%s' "$board_ls_wanted" | _jq -r '.[] | @base64') || exit 1
     for board_ls_item in $board_ls_created; do
         printf '%s' "$board_ls_item" | _jq -Rr '@base64d' >"$BOARD_TMP/intent"

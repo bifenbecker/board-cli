@@ -44,6 +44,10 @@ Tool: `gh`, tested on 2.96.0. Needs the `project` scope.
   their own endpoints. `DELETE .../labels/<name>` answers 404 for a label the issue lacks.
 - REST `type` is dropped without a word on a repository with no issue types (all user-owned ones).
 - `labels(first:)` and the like stop at 100, and a read that stops early looks complete.
+- Status changes are `ProjectV2ItemStatusChangedEvent` in the issue's `timelineItems`, oldest
+  first, with `previousStatus` and `status` as names. The first one after an issue is added has
+  `previousStatus: ""`. The "Item added" workflow shows as actor `github-project-automation`, with
+  `wasAutomated: false`. A draft has no timeline; `updatedAt` on its Status value is the last set.
 
 ## GitLab
 
@@ -109,6 +113,10 @@ Tool: `glab`, tested on 1.110.0. Always pass `--hostname`: glab may also be logg
   is `Label has already been taken`.
 - `projects/:id/milestones/:id` takes the global `id`, while the URL of a milestone shows the `iid`.
 - An iid is not reused after its issue is deleted.
+- History is `resource_label_events` and `resource_state_events` of an issue, both on Free. One
+  PUT that swaps status labels gives an add and a remove with the same `created_at`; the close or
+  reopen of the same PUT is a state event about 150 ms earlier. A label set at creation is an add
+  event at the creation time. A deleted label leaves its events with `label: null`.
 
 ## Linear
 
@@ -180,6 +188,9 @@ exit codes, so nothing depends on them: only `linear api` is used, and its JSON 
 - `first:` on a nested connection stops there without a word. The list reads 50 labels per issue,
   because 250 on 100 issues is a lot of complexity; a single issue reads 250 of everything.
 - Rate limit: 2,500 requests and 3,000,000 complexity per hour for an API key.
+- `issue.history` is newest first; a state change has `fromState` and `toState`. Changes the
+  creator makes in the first minutes after creating an issue never show there: Linear folds them
+  into the creation. A change by Linear itself, such as auto-close, has `actor: null`.
 
 ## Jira
 
@@ -235,6 +246,11 @@ no command for statuses, transitions, priorities or users.
 - `/project/KAN/statuses` repeats the same list under each issue type, in the order `Done`,
   `In Progress`, `To Do`, `In Review`. The board's column order comes from
   `/rest/agile/1.0/board/<id>/configuration`, which names statuses by id.
+- `/issue/<key>/changelog` on Cloud pages by `startAt` with `isLast`, oldest first. A status
+  change is an item with `fieldId: "status"`, `from` and `to` as status ids and `fromString` and
+  `toString` as the names of the time. Creation is not an entry. Data Center has the same
+  histories under `?expand=changelog` on the issue; that path is not tested here, as there is no
+  Data Center target.
 
 ### curl
 

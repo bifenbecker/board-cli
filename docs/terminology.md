@@ -11,6 +11,7 @@ it, while "task" is an issue type on two of them.
 | status    | WorkflowState    | Status              | Option of the `Status` field        | List label + open/closed   |
 | category  | `state.type`     | `statusCategory`    | `[board.statuses]`                  | `[board.statuses]`         |
 | move      | set `stateId`    | transition          | set field, sometimes close          | swap labels, `state_event` |
+| history   | `history`        | changelog           | `ProjectV2ItemStatusChangedEvent`   | label and state events     |
 | priority  | 0-4              | Priority            | single-select field                 | label                      |
 | sprint    | Cycle            | Sprint              | Iteration field                     | Iteration (Premium)        |
 | milestone | ProjectMilestone | Version             | Milestone                           | Milestone                  |
@@ -37,6 +38,12 @@ GitHub and GitLab have no such concept, so `[board.statuses]` declares it. On Ji
 same table overrides the native category, which is how Jira gets `canceled`. A status with no
 category reads as `category: null`, and `board doctor` fails until it is declared: board never
 guesses, because a wrong `done` is worse than none.
+
+## History
+
+`board issue history` lists the **moves** of an issue: each change of its status, with `from`,
+`to`, `at` and `by`. **since** is when the issue entered the status it is in. A **plan** is what a
+write prints under `--dry-run` in place of its result.
 
 ## Priorities
 
