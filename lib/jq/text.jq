@@ -35,6 +35,10 @@ def text_issue:
     (if .description then "", .description else empty end),
     (if .comments then (.comments[] | "", "--- \(.author.name | dash), \(.created_at | dash)", .body) else empty end);
 
+def text_history:
+    "\(.id)\t\(.status.name | dash)\tsince \(.since | dash)",
+    (.moves[] | "\(.at | dash)\t\(.from.name | dash) -> \(.to.name | dash)\t\(.by.name | dash)");
+
 def text_comments: .[] | "\(.id)  \(.author.name | dash), \(.created_at | dash)", .body, "";
 
 def text_links: .[] | "\(.type)\t\(.id)";

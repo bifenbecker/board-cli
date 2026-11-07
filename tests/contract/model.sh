@@ -60,3 +60,53 @@ test_name_comparison_treats_regex_as_text() {
     got=$(model_jq -nc 'include "jq/common"; "a.c" | ieq("a(") ')
     t_eq "$got" false ieq
 }
+
+# --- history -----------------------------------------------------------------------------
+
+# Usage: model_history <make_history input as jq>
+model_history() {
+    model_jq -nc "include \"jq/common\"; $1 | make_history({statuses: {Review: \"in_progress\"}})"
+}
+
+MODEL_ISSUE='{id: "1", status: {name: "Review", category: "in_progress"}, created_at: "2026-11-01T00:00:00Z"}'
+
+test_history_since_is_the_last_move_into_the_status() {
+    got=$(model_history "{issue: $MODEL_ISSUE, moves: [
+        {from: {name: \"Todo\", native: \"todo\"}, to: {name: \"review\"}, at: \"2026-11-03T10:00:00.5+0100\", by: {id: 7, name: \"A\"}},
+        {from: null, to: {name: \"Todo\", native: \"todo\"}, at: \"2026-11-02T00:00:00Z\", by: null}]}")
+    t_jq "$got" .since '"2026-11-03T09:00:00Z"'
+    t_jq "$got" '.moves | map(.at)' '["2026-11-02T00:00:00Z","2026-11-03T09:00:00Z"]'
+    t_jq "$got" '.moves[1].to' '{"name":"review","category":"in_progress"}'
+    t_jq "$got" '.moves[1].by' '{"id":"7","name":"A"}'
+    t_jq "$got" '.moves[0].from' null
+}
+
+test_history_since_is_created_when_nothing_moved() {
+    t_jq "$(model_history "{issue: $MODEL_ISSUE, moves: []}")" .since '"2026-11-01T00:00:00Z"'
+    t_jq "$(model_history "{issue: $MODEL_ISSUE, moves: [], since: \"2026-11-05T00:00:00Z\"}")" .since '"2026-11-05T00:00:00Z"'
+}
+
+test_history_since_is_null_when_the_moves_end_elsewhere() {
+    got=$(model_history "{issue: $MODEL_ISSUE, moves: [{from: null, to: {name: \"Old name\"}, at: \"2026-11-02T00:00:00Z\"}]}")
+    t_jq "$got" .since null
+}
+
+test_history_with_no_status_name_matches_on_category() {
+    got=$(model_history '{issue: {id: "1", status: {name: null, category: "todo"}}, moves: [
+        {from: {name: "x"}, to: {name: null, native: "todo"}, at: "2026-11-02T00:00:00Z"}]}')
+    t_jq "$got" .since '"2026-11-02T00:00:00Z"'
+}
+
+test_history_by_without_an_id_is_null() {
+    got=$(model_history "{issue: $MODEL_ISSUE, moves: [{from: null, to: {name: \"Review\"}, at: null, by: {id: null, name: \"bot\"}}]}")
+    t_jq "$got" '.moves[0].by' null
+}
+
+test_history_passes_the_schema() {
+    got=$(model_jq -nc --slurpfile h "$BOARD_TEST_ROOT/lib/schema/history.json" \
+        --slurpfile m "$BOARD_TEST_ROOT/lib/schema/move.json" "
+        include \"jq/common\"; include \"jq/schema\";
+        {issue: $MODEL_ISSUE, moves: [{from: {name: \"Todo\"}, to: {name: \"Review\"}, at: \"2026-11-02T00:00:00Z\", by: {id: 1, name: \"A\"}}]}
+        | make_history({}) | [schema_problems(\$h[0]), (.moves[] | schema_problems(\$m[0]))]")
+    t_eq "$got" '[]' problems
+}

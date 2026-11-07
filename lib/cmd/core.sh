@@ -19,7 +19,8 @@ START HERE
   documentation: read it instead of guessing a flag.
 
 COMMANDS
-  issue        Issues: list, view, create, edit, move, close, reopen, delete, comment, link
+  issue        Issues: list, view, history, create, edit, move, close, reopen, delete, comment,
+               link
   status       Statuses of the board: list, add, rename, delete
   label        Labels: list, create, edit, delete, sync
   member       People who can be assigned

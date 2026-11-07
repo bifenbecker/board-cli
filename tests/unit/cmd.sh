@@ -117,3 +117,11 @@ test_init_cannot_place_an_unknown_host() {
     t_status 2
     t_contains "$T_ERR" --kind
 }
+
+test_history_needs_one_id() {
+    cmd_board
+    t_run board issue history
+    t_status 2
+    t_run board issue history 1 2
+    t_status 2
+}

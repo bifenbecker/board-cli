@@ -19,6 +19,7 @@ repository is owner/repo#12.
 COMMANDS
   list      List issues
   view      Show one issue
+  history   Status changes of an issue, and since when it is in its status
   create    Create an issue
   edit      Change the fields of an issue
   move      Change the status of an issue
@@ -638,6 +639,58 @@ cmd_issue_reopen() {
     issue_check_from "$arg_id" "$opt_from"
     board_doc=$(board_call issue_reopen "$arg_id" "$opt_status") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
+}
+
+# --- history -----------------------------------------------------------------------------
+
+help_issue_history() {
+    cat <<'EOF'
+NAME
+  board issue history - status changes of an issue
+
+USAGE
+  board issue history <id>
+
+DESCRIPTION
+  Lists every change of status the board recorded, oldest first, and says since when the issue is
+  in its current status. Other changes, such as title or labels, are left out. Categories are read
+  through today's [board.statuses], not the ones in force at the time.
+
+ARGUMENTS
+  <id>   The issue, as the board shows it
+
+OUTPUT
+  Text: id, status and since on the first line, then one move per line, tab-separated: at,
+        from -> to, by.
+  JSON: {id, status{name, category}, since, moves[{from{name, category}, to{name, category}, at,
+        by{id, name}}]}
+  since is when the issue entered its status: the at of the last move, or created_at when nothing
+  moved. It is null when the moves do not end in the current status: a status renamed since, or a
+  change the board did not record. from is null where the board records no status before. by is
+  null for automation with no person behind it. Timestamps are UTC.
+
+PLATFORM NOTES
+  Linear: from the issue's history.
+  Jira: from the changelog. A status renamed since keeps its old name in a move.
+  GitHub: from the Status changes of the item in this project; other projects are left out. The
+          project's built-in workflows show as github-project-automation. A draft records no
+          changes: moves is [] and since is when Status was last set.
+  GitLab: rebuilt from label and open/closed events by the rule of 'board issue view', so a closed
+          issue reads done. Changes within a second count as one move. A label deleted since is
+          not seen.
+
+EXAMPLES
+  board issue history KAN-1
+  board issue history 12 --jq .since
+  board issue history 3KD-13 --jq '.moves[-1].by.name'
+EOF
+}
+
+cmd_issue_history() {
+    [ $# -eq 1 ] || board_usage_die "<id> is required"
+    board_require_id "$1"
+    board_doc=$(board_call issue_history "$1") || board_fail "$?" "$board_doc"
+    printf '%s\n' "$board_doc" | board_output text_history
 }
 
 # --- delete ------------------------------------------------------------------------------
