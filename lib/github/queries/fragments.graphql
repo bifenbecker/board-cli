@@ -29,7 +29,7 @@ fragment ItemFields on ProjectV2Item {
   isArchived
   createdAt
   updatedAt
-  status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name optionId } }
+  status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name optionId updatedAt } }
   priority: fieldValueByName(name: $priorityField) { ... on ProjectV2ItemFieldSingleSelectValue { name optionId } }
   due: fieldValueByName(name: $dueField) { ... on ProjectV2ItemFieldDateValue { date } }
   sprint: fieldValueByName(name: $sprintField) { ... on ProjectV2ItemFieldIterationValue { title iterationId } }

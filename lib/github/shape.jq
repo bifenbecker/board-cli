@@ -79,6 +79,15 @@ def gh_item($cfg; $repo):
 def gh_our_item($number; $owner):
     (. // []) | map(select(.project.number == $number and gh_same_repo(.project.owner.login // ""; $owner))) | first;
 
+# Input: the nodes of an issue's timeline. Status changes on this project, as make_move input. An
+# empty previousStatus is no status before.
+def gh_moves($number; $owner):
+    map(select(.project != null and .project.number == $number and gh_same_repo(.project.owner.login // ""; $owner))
+        | {from: (if (.previousStatus // "") == "" then null else {name: .previousStatus} end),
+           to: {name: (if (.status // "") == "" then null else .status end)},
+           at: .createdAt,
+           by: (if .actor.login then {id: .actor.login, name: .actor.login} else null end)});
+
 # Input: an Issue with projectItems.
 def gh_issue($cfg; $repo; $number; $owner):
     . as $issue
