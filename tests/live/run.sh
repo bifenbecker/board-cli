@@ -173,6 +173,12 @@ scenario() {
     done
     step 'close' '.status.category == "done"' issue close "$a" --json
     step 'reopen' '.status.category == "todo"' issue reopen "$a" --json
+    now=$(field issue view "$a" --jq '.status.name // ""')
+    done_status=$(field status list --jq '[.[] | select(.category == "done") | .name] | first // ""')
+    if [ -n "$now" ] && [ -n "$done_status" ]; then
+        expect_exit 7 'move from a status it is not in' issue move "$a" "$now" --from "$done_status"
+        step 'move from where it is' ".status.name == \"$now\"" issue move "$a" "$now" --from "$now" --json
+    fi
 
     if [ "${RECORD:-}" = 1 ]; then
         snapshot "$a"

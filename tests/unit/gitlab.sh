@@ -362,6 +362,60 @@ test_reopen_leaves_an_open_issue_alone() {
     t_lacks "$(cat "$FAKE_LOG")" PUT
 }
 
+# --from is the core's, before any adapter write: GitLab's fake needs the fewest answers.
+
+test_move_from_another_status_is_a_conflict_and_writes_nothing() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue move 1 done --from zeta
+    t_status 7
+    t_contains "$T_ERR" "1 is in 'alpha', not 'zeta': nothing written"
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+}
+
+test_move_from_the_current_status_ignores_case() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue move 1 done --from ALPHA --json
+    t_status 0
+    t_contains "$(cat "$FAKE_LOG")" PUT
+}
+
+test_move_from_a_status_nobody_has_is_usage() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue move 1 done --from nope
+    t_status 2
+    t_contains "$T_ERR" "no status 'nope'. Valid: zeta, alpha, done, wontfix"
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+}
+
+test_move_from_with_no_status_label_never_matches() {
+    gitlab_board
+    gl_issue '[]'
+    t_run board issue move 1 done --from zeta
+    t_status 7
+    t_contains "$T_ERR" "'no status'"
+}
+
+test_close_and_reopen_check_from() {
+    gitlab_board
+    gl_issue '["alpha"]'
+    t_run board issue close 1 --from zeta
+    t_status 7
+    t_run board issue reopen 1 --status zeta --from zeta
+    t_status 7
+    t_lacks "$(cat "$FAKE_LOG")" PUT
+    t_run board issue close 1 --from alpha --json
+    t_status 0
+}
+
+test_from_needs_a_value() {
+    gitlab_board
+    t_run board issue move 1 done --from
+    t_status 2
+}
+
 test_a_status_nothing_declares_reads_with_no_status_name() {
     gitlab_board
     gl_issue '["other"]'

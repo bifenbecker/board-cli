@@ -102,6 +102,7 @@ lib/<kind>/unsupported.txt  <name> <reason>, for a call this board cannot do
 | 4 | Not found | `board_not_found` |
 | 5 | Not authenticated, or not allowed | `board_auth_die` |
 | 6 | Partial: a write went through and a later step failed | `board_partial` |
+| 7 | Conflict: the issue is not in the `--from` status; nothing written | `board_conflict` |
 
 An agent branches on these codes, so a failure is never turned into exit 0, and "nothing found" for
 one object is 4 rather than empty output. A list with nothing in it is `[]` and exit 0. A child's

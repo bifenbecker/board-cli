@@ -444,21 +444,43 @@ cmd_issue_edit() {
 
 # --- move --------------------------------------------------------------------------------
 
+# --from: the issue must be in that status now, or nothing is written. A name no status has is a
+# wrong call, not a conflict, so it is looked up only when the issue is elsewhere.
+# Usage: issue_check_from <id> <status|"">
+issue_check_from() {
+    [ -n "$2" ] || return 0
+    issue_cf_doc=$(board_call issue_view "$1") || board_fail "$?" "$issue_cf_doc"
+    if printf '%s' "$issue_cf_doc" | _jq -e --arg f "$2" 'include "jq/common"; .status.name | ieq($f)' >/dev/null; then
+        return 0
+    fi
+    issue_cf_list=$(board_call status_list) || board_fail "$?" "$issue_cf_list"
+    if ! printf '%s' "$issue_cf_list" | _jq -e --arg f "$2" 'include "jq/common"; any(.[]; .name | ieq($f))' >/dev/null; then
+        board_usage_die "--from: no status '$2'. Valid: $(printf '%s' "$issue_cf_list" | _jq -r '[.[].name] | join(", ")')"
+    fi
+    board_conflict "$1 is in '$(printf '%s' "$issue_cf_doc" | _jq -r '.status.name // "no status"')', not '$2': nothing written"
+}
+
 help_issue_move() {
     cat <<EOF
 NAME
   board issue move - change the status of an issue
 
 USAGE
-  board issue move <id> <status>
+  board issue move <id> <status> [--from <status>]
 
 DESCRIPTION
   Moves an issue to a status, named as 'board status list' shows it, ignoring case. Moving an issue
   that is already there succeeds. An unknown status is exit 2, and stderr lists the valid ones.
+  --from reads the issue, then writes: a change made between the two is not seen. It is a check,
+  not a lock.
 
 ARGUMENTS
   <id>        The issue, as the board shows it
   <status>    The status to move to
+
+FLAGS
+      --from <status>   Move only if the issue is in this status now, ignoring case. Otherwise
+                        exit 7 and nothing is written. A name no status has is exit 2
 
 OUTPUT
   Text: the URL of the issue.
@@ -472,19 +494,39 @@ PLATFORM NOTES
   GitLab: on Free a status is a label. board removes the other status labels in the same call. A
           status mapped to done or canceled also closes the issue, and any other reopens it.
   Linear: two statuses may share a name: exit 2 lists them, and <status> then takes the id from
-          'board status list --json'.
+          'board status list --json'. A read can lag a write by seconds, so --from right after a
+          change may see the old status: exit 7 then means read the issue again.
+  GitHub, GitLab: an issue with no status never matches --from.
 
 EXAMPLES
   board issue move KAN-1 "In Progress"
+  board issue move KAN-1 Done --from "In Progress"
   board issue move 12 done --jq .status
 EOF
 }
 
 cmd_issue_move() {
-    [ $# -eq 2 ] || board_usage_die "<id> and <status> are required"
-    board_require_id "$1"
-    [ -n "$2" ] || board_usage_die "<status> must not be empty"
-    board_doc=$(board_call issue_move "$1" "$2") || board_fail "$?" "$board_doc"
+    arg_id='' arg_status='' arg_count=0 opt_from=''
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --from) board_arg "$@"; opt_from=$2; shift 2 ;;
+            -*) board_unknown_flag "$1" ;;
+            *)
+                arg_count=$((arg_count + 1))
+                case $arg_count in
+                    1) arg_id=$1 ;;
+                    2) arg_status=$1 ;;
+                    *) board_unexpected "$1" ;;
+                esac
+                shift
+                ;;
+        esac
+    done
+    [ "$arg_count" -eq 2 ] || board_usage_die "<id> and <status> are required"
+    board_require_id "$arg_id"
+    [ -n "$arg_status" ] || board_usage_die "<status> must not be empty"
+    issue_check_from "$arg_id" "$opt_from"
+    board_doc=$(board_call issue_move "$arg_id" "$arg_status") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -496,16 +538,19 @@ NAME
   board issue close - move an issue to a done or canceled status
 
 USAGE
-  board issue close <id> [--reason done|canceled]
+  board issue close <id> [--reason done|canceled] [--from <status>]
 
 DESCRIPTION
   Moves the issue to the first status of the category. Closing a closed issue succeeds.
+  --from reads the issue, then writes: it is a check, not a lock.
 
 ARGUMENTS
   <id>                The issue, as the board shows it
 
 FLAGS
   -r, --reason <r>    done (default) or canceled
+      --from <status> Close only if the issue is in this status now, ignoring case. Otherwise
+                      exit 7 and nothing is written. A name no status has is exit 2
 
 OUTPUT
   Text: the URL of the issue.
@@ -524,10 +569,11 @@ EOF
 }
 
 cmd_issue_close() {
-    arg_id='' opt_reason=done
+    arg_id='' opt_reason=done opt_from=''
     while [ $# -gt 0 ]; do
         case $1 in
             -r | --reason) board_arg "$@"; opt_reason=$2; shift 2 ;;
+            --from) board_arg "$@"; opt_from=$2; shift 2 ;;
             -*) board_unknown_flag "$1" ;;
             *)
                 [ -z "$arg_id" ] || board_unexpected "$1"
@@ -538,6 +584,7 @@ cmd_issue_close() {
     done
     board_require_id "$arg_id"
     board_require_one_of --reason "$opt_reason" done canceled
+    issue_check_from "$arg_id" "$opt_from"
     board_doc=$(board_call issue_close "$arg_id" "$opt_reason") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
@@ -548,17 +595,20 @@ NAME
   board issue reopen - move a closed issue back to a todo status
 
 USAGE
-  board issue reopen <id> [--status <name>]
+  board issue reopen <id> [--status <name>] [--from <status>]
 
 DESCRIPTION
   Moves the issue to the first status in the todo category, or to the one named. Reopening an open
   issue succeeds and leaves it where it is, unless --status names another.
+  --from reads the issue, then writes: it is a check, not a lock.
 
 ARGUMENTS
   <id>                  The issue, as the board shows it
 
 FLAGS
   -s, --status <name>   Status to reopen into
+      --from <status>   Reopen only if the issue is in this status now, ignoring case. Otherwise
+                        exit 7 and nothing is written. A name no status has is exit 2
 
 OUTPUT
   Text: the URL of the issue.
@@ -571,10 +621,11 @@ EOF
 }
 
 cmd_issue_reopen() {
-    arg_id='' opt_status=''
+    arg_id='' opt_status='' opt_from=''
     while [ $# -gt 0 ]; do
         case $1 in
             -s | --status) board_arg "$@"; opt_status=$2; shift 2 ;;
+            --from) board_arg "$@"; opt_from=$2; shift 2 ;;
             -*) board_unknown_flag "$1" ;;
             *)
                 [ -z "$arg_id" ] || board_unexpected "$1"
@@ -584,6 +635,7 @@ cmd_issue_reopen() {
         esac
     done
     board_require_id "$arg_id"
+    issue_check_from "$arg_id" "$opt_from"
     board_doc=$(board_call issue_reopen "$arg_id" "$opt_status") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }

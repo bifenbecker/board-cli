@@ -53,6 +53,8 @@ EXIT CODES
   5  not authenticated, or the token may not do this. Ask the user to log in; do not retry
   6  partial: a write went through and a later step failed. The id is on stdout.
      Do not repeat the write. Finish with 'board issue edit' or 'board issue move'
+  7  conflict: the issue is no longer in the --from status, so nothing was written.
+     Read it again and decide; do not repeat the command blindly
 
 WHEN A COMMAND IS NOT ENOUGH
   Use 'board api' for what no command covers. It speaks the board's own API, so what it prints
