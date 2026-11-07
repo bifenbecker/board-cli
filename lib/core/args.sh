@@ -17,6 +17,8 @@ board_unexpected() {
 # Usage: board_read_body_file <path|->  — sets BOARD_BODY.
 board_read_body_file() {
     if [ "$1" = - ]; then
+        # Inside board batch stdin is the batch, so it would read as an empty body.
+        [ -z "${BOARD_NO_STDIN:-}" ] || board_usage_die "--body-file - cannot read stdin inside board batch: pass a file"
         BOARD_BODY=$(cat) || board_die "cannot read stdin"
     else
         [ -f "$1" ] || board_usage_die "file not found: $1"

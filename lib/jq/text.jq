@@ -35,6 +35,15 @@ def text_issue:
     (if .description then "", .description else empty end),
     (if .comments then (.comments[] | "", "--- \(.author.name | dash), \(.created_at | dash)", .body) else empty end);
 
+def text_batch:
+    .[] | "\(.exit // "-")\t\(.args | join(" "))\t\(
+        if .exit == null then "not run"
+        elif .exit != 0 then (.error // "" | split("\n")[0])
+        elif (.result | type) == "object" then
+            (if .result.dry_run then "dry run" else (.result.url // .result.id // .result.name // "ok") end)
+        elif (.result | type) == "array" then "\(.result | length) items"
+        else (.result // "ok" | tostring) end)";
+
 def text_history:
     "\(.id)\t\(.status.name | dash)\tsince \(.since | dash)",
     (.moves[] | "\(.at | dash)\t\(.from.name | dash) -> \(.to.name | dash)\t\(.by.name | dash)");

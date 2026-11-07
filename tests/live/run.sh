@@ -179,6 +179,20 @@ scenario() {
         expect_exit 7 'move from a status it is not in' issue move "$a" "$now" --from "$done_status"
         step 'move from where it is' ".status.name == \"$now\"" issue move "$a" "$now" --from "$now" --json
     fi
+    # Linear folds the changes of an issue's first minutes into its creation: no moves to expect.
+    case $kind in
+        linear) step 'history' '.since != null and (.moves | type) == "array"' issue history "$a" --json ;;
+        *) step 'history' '(.moves | length) >= 3 and .since != null' issue history "$a" --json ;;
+    esac
+
+    step 'dry run move' ".dry_run and .issue.id == \"$a\"" issue move "$a" "$status" --dry-run --json
+    step 'dry run changed nothing' ".status.name == \"$now\"" issue view "$a" --json
+    expect_exit 2 'dry run to a status that is not there' issue move "$a" no-such-status --dry-run
+    step 'dry run delete' '.dry_run' issue delete "$a" --yes --dry-run --json
+    printf '%s\n' "[\"issue\",\"view\",\"$a\"]" "[\"issue\",\"history\",\"$a\"]" >"$work/batch"
+    step 'batch' 'map(.exit) == [0,0]' batch --json <"$work/batch"
+    printf '%s\n' "[\"issue\",\"move\",\"$a\",\"$now\"]" "[\"issue\",\"view\",\"$(missing_id)\"]" >"$work/batch"
+    expect_exit 6 'batch with a write before a failure' batch <"$work/batch"
 
     if [ "${RECORD:-}" = 1 ]; then
         snapshot "$a"

@@ -26,6 +26,7 @@ COMMANDS
   member       People who can be assigned
   sprint       Sprints and cycles: list, view, current
   milestone    Milestones and versions: list, view, create, edit, delete
+  batch        Run several commands from stdin, one result each
 
   init         Declare the board of this project from its URL
   list         Boards reachable with the current login
@@ -45,6 +46,7 @@ CHANGING SAFELY
   what only the write finds out: an assignee name, a type, a parent rule, a Jira transition.
   --from <status> on move, close and reopen acts only from the status you saw: exit 7 means the
   issue moved since. It is a read and then a write, not a lock.
+  'board batch' runs many commands in one call and reports each: exit 6 means some went through.
 
 WORKING WITH THE OUTPUT
   Act on results through --json or --jq <expr>: the keys and types are the same on every board,
