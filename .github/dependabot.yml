@@ -7,6 +7,7 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+    # The group's name ends the request title: a short one keeps it within the 72 of a subject.
     groups:
-      actions:
+      ci:
         patterns: ["*"]
