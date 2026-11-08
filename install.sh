@@ -11,7 +11,7 @@ Usage: install.sh [--prefix <dir>] [--version <tag>] [--from <dir>] [--uninstall
 Installs board into <prefix>/share/board and a board command into <prefix>/bin.
 
   --prefix <dir>    Where to install (default: ~/.local)
-  --version <tag>   Release to install, e.g. v0.1.0 (default: the latest release)
+  --version <tag>   Release to install, e.g. v0.2.0 or 0.2.0 (default: the latest release)
   --from <dir>      Install from a local checkout instead of downloading
   --uninstall       Remove board from <prefix>
   -h, --help        Show this help
@@ -108,8 +108,10 @@ fetch() {
 # "no release" would install unreleased code.
 latest_tag() {
     if command -v curl >/dev/null 2>&1; then
-        latest_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$BOARD_REPO_SLUG/releases/latest") ||
+        # Everything goes to stdout: a native Windows curl cannot open a path of sh, not even /dev/null.
+        latest_url=$(curl -fsSLI -w '\n%{url_effective}' "https://github.com/$BOARD_REPO_SLUG/releases/latest") ||
             die "cannot reach GitHub to find the latest release; pass --version <tag>"
+        latest_url=$(printf '%s\n' "$latest_url" | tail -n 1)
         case $latest_url in
             */releases/tag/*) printf '%s' "${latest_url##*/releases/tag/}" ;;
         esac
@@ -129,6 +131,10 @@ if [ -n "$from" ]; then
 else
     command -v tar >/dev/null 2>&1 || die "tar is required"
     [ -n "$version" ] || version=$(latest_tag)
+    # Tags are v<version>, while board version prints the version alone.
+    case $version in
+        [0-9]*) version=v$version ;;
+    esac
     if [ -n "$version" ]; then
         url="https://github.com/$BOARD_REPO_SLUG/archive/refs/tags/$version.tar.gz"
     else
