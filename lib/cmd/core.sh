@@ -551,7 +551,7 @@ DESCRIPTION
   install.sh.
 
 FLAGS
-  --version <tag>   Release to install, e.g. v0.1.0 (default: the latest release)
+  --version <tag>   Release to install, e.g. v0.2.0 or 0.2.0 (default: the latest release)
 
 OUTPUT
   Text: progress from install.sh
@@ -579,7 +579,11 @@ cmd_self_update() {
     curl -fsSL "$BOARD_INSTALL_URL" >"$board_su_script" || board_die "cannot download $BOARD_INSTALL_URL"
     set -- --prefix "$board_su_prefix"
     [ -z "$opt_version" ] || set -- "$@" --version "$opt_version"
-    sh "$board_su_script" "$@"
+    # install.sh runs as if started by hand: bin/board's Git Bash settings are for board's own calls.
+    (
+        unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+        sh "$board_su_script" "$@"
+    )
 }
 
 help_self_uninstall() {
