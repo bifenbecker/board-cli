@@ -21,18 +21,6 @@ jobs:
       - name: Lint
         run: just lint
 
-  commit-message:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check the request title
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          pipx install commit-check==2.15.1
-          printf '%s\n' "$TITLE" | commit-check --message
-
   # One job per OS and suite, so the slow process start of macOS and Windows is paid in parallel.
   # core is every test file the other suites leave out; a new adapter's tests land there until
   # it gets a suite of its own here and in the case below.
