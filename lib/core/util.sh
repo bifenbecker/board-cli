@@ -6,6 +6,7 @@ BOARD_EXIT_UNSUPPORTED=3
 BOARD_EXIT_NOT_FOUND=4
 BOARD_EXIT_AUTH=5
 BOARD_EXIT_PARTIAL=6
+BOARD_EXIT_CONFLICT=7
 
 BOARD_INSTALL_URL=https://raw.githubusercontent.com/bifenbecker/board-cli/main/install.sh
 
@@ -41,6 +42,12 @@ board_not_found() {
 board_auth_die() {
     board_warn "$@"
     exit "$BOARD_EXIT_AUTH"
+}
+
+# The issue is not where the caller saw it, so nothing was written.
+board_conflict() {
+    board_warn "conflict: $*"
+    exit "$BOARD_EXIT_CONFLICT"
 }
 
 # A write went through and a later step did not. The id goes to stdout so a caller holds it and

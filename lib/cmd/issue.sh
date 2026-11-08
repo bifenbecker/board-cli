@@ -19,6 +19,7 @@ repository is owner/repo#12.
 COMMANDS
   list      List issues
   view      Show one issue
+  history   Status changes of an issue, and since when it is in its status
   create    Create an issue
   edit      Change the fields of an issue
   move      Change the status of an issue
@@ -444,21 +445,43 @@ cmd_issue_edit() {
 
 # --- move --------------------------------------------------------------------------------
 
+# --from: the issue must be in that status now, or nothing is written. A name no status has is a
+# wrong call, not a conflict, so it is looked up only when the issue is elsewhere.
+# Usage: issue_check_from <id> <status|"">
+issue_check_from() {
+    [ -n "$2" ] || return 0
+    issue_cf_doc=$(board_call issue_view "$1") || board_fail "$?" "$issue_cf_doc"
+    if printf '%s' "$issue_cf_doc" | _jq -e --arg f "$2" 'include "jq/common"; .status.name | ieq($f)' >/dev/null; then
+        return 0
+    fi
+    issue_cf_list=$(board_call status_list) || board_fail "$?" "$issue_cf_list"
+    if ! printf '%s' "$issue_cf_list" | _jq -e --arg f "$2" 'include "jq/common"; any(.[]; .name | ieq($f))' >/dev/null; then
+        board_usage_die "--from: no status '$2'. Valid: $(printf '%s' "$issue_cf_list" | _jq -r '[.[].name] | join(", ")')"
+    fi
+    board_conflict "$1 is in '$(printf '%s' "$issue_cf_doc" | _jq -r '.status.name // "no status"')', not '$2': nothing written"
+}
+
 help_issue_move() {
     cat <<EOF
 NAME
   board issue move - change the status of an issue
 
 USAGE
-  board issue move <id> <status>
+  board issue move <id> <status> [--from <status>]
 
 DESCRIPTION
   Moves an issue to a status, named as 'board status list' shows it, ignoring case. Moving an issue
   that is already there succeeds. An unknown status is exit 2, and stderr lists the valid ones.
+  --from reads the issue, then writes: a change made between the two is not seen. It is a check,
+  not a lock.
 
 ARGUMENTS
   <id>        The issue, as the board shows it
   <status>    The status to move to
+
+FLAGS
+      --from <status>   Move only if the issue is in this status now, ignoring case. Otherwise
+                        exit 7 and nothing is written. A name no status has is exit 2
 
 OUTPUT
   Text: the URL of the issue.
@@ -472,19 +495,39 @@ PLATFORM NOTES
   GitLab: on Free a status is a label. board removes the other status labels in the same call. A
           status mapped to done or canceled also closes the issue, and any other reopens it.
   Linear: two statuses may share a name: exit 2 lists them, and <status> then takes the id from
-          'board status list --json'.
+          'board status list --json'. A read can lag a write by seconds, so --from right after a
+          change may see the old status: exit 7 then means read the issue again.
+  GitHub, GitLab: an issue with no status never matches --from.
 
 EXAMPLES
   board issue move KAN-1 "In Progress"
+  board issue move KAN-1 Done --from "In Progress"
   board issue move 12 done --jq .status
 EOF
 }
 
 cmd_issue_move() {
-    [ $# -eq 2 ] || board_usage_die "<id> and <status> are required"
-    board_require_id "$1"
-    [ -n "$2" ] || board_usage_die "<status> must not be empty"
-    board_doc=$(board_call issue_move "$1" "$2") || board_fail "$?" "$board_doc"
+    arg_id='' arg_status='' arg_count=0 opt_from=''
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --from) board_arg "$@"; [ -n "$2" ] || board_usage_die "--from must not be empty"; opt_from=$2; shift 2 ;;
+            -*) board_unknown_flag "$1" ;;
+            *)
+                arg_count=$((arg_count + 1))
+                case $arg_count in
+                    1) arg_id=$1 ;;
+                    2) arg_status=$1 ;;
+                    *) board_unexpected "$1" ;;
+                esac
+                shift
+                ;;
+        esac
+    done
+    [ "$arg_count" -eq 2 ] || board_usage_die "<id> and <status> are required"
+    board_require_id "$arg_id"
+    [ -n "$arg_status" ] || board_usage_die "<status> must not be empty"
+    issue_check_from "$arg_id" "$opt_from"
+    board_doc=$(board_call issue_move "$arg_id" "$arg_status") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
 
@@ -496,16 +539,19 @@ NAME
   board issue close - move an issue to a done or canceled status
 
 USAGE
-  board issue close <id> [--reason done|canceled]
+  board issue close <id> [--reason done|canceled] [--from <status>]
 
 DESCRIPTION
   Moves the issue to the first status of the category. Closing a closed issue succeeds.
+  --from reads the issue, then writes: it is a check, not a lock.
 
 ARGUMENTS
   <id>                The issue, as the board shows it
 
 FLAGS
   -r, --reason <r>    done (default) or canceled
+      --from <status> Close only if the issue is in this status now, ignoring case. Otherwise
+                      exit 7 and nothing is written. A name no status has is exit 2
 
 OUTPUT
   Text: the URL of the issue.
@@ -513,6 +559,7 @@ OUTPUT
 
 PLATFORM NOTES
   Jira: --reason canceled needs a status declared canceled in [board.statuses].
+  GitHub, GitLab: an issue with no status never matches --from.
   GitHub: --reason canceled closes the issue as not planned. The built-in workflow "Item closed"
           may then set the status to Done.
   GitLab: with no status declared for the reason, the issue just closes and loses its status label.
@@ -524,10 +571,11 @@ EOF
 }
 
 cmd_issue_close() {
-    arg_id='' opt_reason=done
+    arg_id='' opt_reason=done opt_from=''
     while [ $# -gt 0 ]; do
         case $1 in
             -r | --reason) board_arg "$@"; opt_reason=$2; shift 2 ;;
+            --from) board_arg "$@"; [ -n "$2" ] || board_usage_die "--from must not be empty"; opt_from=$2; shift 2 ;;
             -*) board_unknown_flag "$1" ;;
             *)
                 [ -z "$arg_id" ] || board_unexpected "$1"
@@ -538,6 +586,7 @@ cmd_issue_close() {
     done
     board_require_id "$arg_id"
     board_require_one_of --reason "$opt_reason" done canceled
+    issue_check_from "$arg_id" "$opt_from"
     board_doc=$(board_call issue_close "$arg_id" "$opt_reason") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
 }
@@ -548,21 +597,27 @@ NAME
   board issue reopen - move a closed issue back to a todo status
 
 USAGE
-  board issue reopen <id> [--status <name>]
+  board issue reopen <id> [--status <name>] [--from <status>]
 
 DESCRIPTION
   Moves the issue to the first status in the todo category, or to the one named. Reopening an open
   issue succeeds and leaves it where it is, unless --status names another.
+  --from reads the issue, then writes: it is a check, not a lock.
 
 ARGUMENTS
   <id>                  The issue, as the board shows it
 
 FLAGS
   -s, --status <name>   Status to reopen into
+      --from <status>   Reopen only if the issue is in this status now, ignoring case. Otherwise
+                        exit 7 and nothing is written. A name no status has is exit 2
 
 OUTPUT
   Text: the URL of the issue.
   JSON: $ISSUE_SHAPE
+
+PLATFORM NOTES
+  GitHub, GitLab: an issue with no status never matches --from.
 
 EXAMPLES
   board issue reopen KAN-1
@@ -571,10 +626,11 @@ EOF
 }
 
 cmd_issue_reopen() {
-    arg_id='' opt_status=''
+    arg_id='' opt_status='' opt_from=''
     while [ $# -gt 0 ]; do
         case $1 in
             -s | --status) board_arg "$@"; opt_status=$2; shift 2 ;;
+            --from) board_arg "$@"; [ -n "$2" ] || board_usage_die "--from must not be empty"; opt_from=$2; shift 2 ;;
             -*) board_unknown_flag "$1" ;;
             *)
                 [ -z "$arg_id" ] || board_unexpected "$1"
@@ -584,8 +640,62 @@ cmd_issue_reopen() {
         esac
     done
     board_require_id "$arg_id"
+    issue_check_from "$arg_id" "$opt_from"
     board_doc=$(board_call issue_reopen "$arg_id" "$opt_status") || board_fail "$?" "$board_doc"
     printf '%s\n' "$board_doc" | board_output text_url
+}
+
+# --- history -----------------------------------------------------------------------------
+
+help_issue_history() {
+    cat <<'EOF'
+NAME
+  board issue history - status changes of an issue
+
+USAGE
+  board issue history <id>
+
+DESCRIPTION
+  Lists every change of status the board recorded, oldest first, and says since when the issue is
+  in its current status. Other changes, such as title or labels, are left out. Categories are read
+  through today's [board.statuses], not the ones in force at the time.
+
+ARGUMENTS
+  <id>   The issue, as the board shows it
+
+OUTPUT
+  Text: id, status and since on the first line, then one move per line, tab-separated: at,
+        from -> to, by.
+  JSON: {id, status{name, category}, since, moves[{from{name, category}, to{name, category}, at,
+        by{id, name}}]}
+  since is when the issue entered its status: the at of the last move, or created_at when nothing
+  moved. It is null when the moves do not end in the current status: a status renamed since, or a
+  change the board did not record. from is null where the board records no status before. by is
+  null for automation with no person behind it. Timestamps are UTC.
+
+PLATFORM NOTES
+  Jira: from the changelog. A status renamed since keeps its old name in a move.
+  GitHub: from the Status changes of the item in this project; other projects are left out. The
+          project's built-in workflows show as github-project-automation. With no moves, since is
+          when Status was last set, not created_at. A draft records no changes: moves is [].
+  Linear: changes made in the first minutes after creating an issue are folded into its creation
+          and do not show: since is then created_at.
+  GitLab: rebuilt from label and open/closed events by the rule of 'board issue view', so a closed
+          issue reads done. Changes less than a second apart count as one move. A label deleted since is
+          not seen.
+
+EXAMPLES
+  board issue history KAN-1
+  board issue history 12 --jq .since
+  board issue history 3KD-13 --jq '.moves[-1].by.name'
+EOF
+}
+
+cmd_issue_history() {
+    [ $# -eq 1 ] || board_usage_die "<id> is required"
+    board_require_id "$1"
+    board_doc=$(board_call issue_history "$1") || board_fail "$?" "$board_doc"
+    printf '%s\n' "$board_doc" | board_output text_history
 }
 
 # --- delete ------------------------------------------------------------------------------
@@ -606,7 +716,7 @@ ARGUMENTS
   <id>        The issue, as the board shows it
 
 FLAGS
-  -y, --yes   Really delete it
+  -y, --yes   Really delete it. A --dry-run needs none
 
 OUTPUT
   Text: nothing.
@@ -636,8 +746,12 @@ cmd_issue_delete() {
         esac
     done
     board_require_id "$arg_id"
-    [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
-    board_call issue_delete "$arg_id" || exit $?
+    [ -n "$opt_yes" ] || board_dry_run || board_usage_die "deleting needs --yes"
+    board_doc=$(board_call issue_delete "$arg_id") || board_fail "$?" "$board_doc"
+    if board_dry_run; then
+        printf '%s\n' "$board_doc" | board_output text_plan
+        return 0
+    fi
     if board_json_mode; then
         _jq -n --arg id "$arg_id" '{id: $id, deleted: true}' | board_output .
     fi
@@ -809,7 +923,7 @@ ARGUMENTS
   <comment-id>    The comment, as 'board issue comment list' shows it
 
 FLAGS
-  -y, --yes       Really delete it
+  -y, --yes       Really delete it. A --dry-run needs none
 
 OUTPUT
   Text: nothing.
@@ -840,8 +954,12 @@ cmd_issue_comment_delete() {
     done
     board_require_id "$arg_id"
     board_require_id "$arg_comment"
-    [ -n "$opt_yes" ] || board_usage_die "deleting needs --yes"
-    board_call issue_comment_delete "$arg_id" "$arg_comment" || exit $?
+    [ -n "$opt_yes" ] || board_dry_run || board_usage_die "deleting needs --yes"
+    board_doc=$(board_call issue_comment_delete "$arg_id" "$arg_comment") || board_fail "$?" "$board_doc"
+    if board_dry_run; then
+        printf '%s\n' "$board_doc" | board_output text_plan
+        return 0
+    fi
     if board_json_mode; then
         _jq -n --arg id "$arg_comment" '{id: $id, deleted: true}' | board_output .
     fi

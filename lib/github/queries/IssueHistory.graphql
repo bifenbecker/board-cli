@@ -1,0 +1,18 @@
+query IssueHistory($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      timelineItems(first: 100, after: $after, itemTypes: [PROJECT_V2_ITEM_STATUS_CHANGED_EVENT]) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          ... on ProjectV2ItemStatusChangedEvent {
+            createdAt
+            previousStatus
+            status
+            actor { login }
+            project { number owner { ... on User { login } ... on Organization { login } } }
+          }
+        }
+      }
+    }
+  }
+}

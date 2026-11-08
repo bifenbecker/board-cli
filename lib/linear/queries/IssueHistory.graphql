@@ -1,0 +1,13 @@
+query IssueHistory {
+  issue(id: $id) {
+    history(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        createdAt
+        fromState { id name type }
+        toState { id name type }
+        actor { id name }
+      }
+    }
+  }
+}

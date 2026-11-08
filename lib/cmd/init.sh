@@ -23,7 +23,8 @@ FLAGS
       --kind <kind>       linear, jira, github or gitlab. Needed for a self-hosted board, whose
                           host name does not say
       --repo <owner/repo> Repository for new issues. Required for a GitHub project URL
-      --dry-run           Print what would be written and write nothing
+      --dry-run           Print what would be written and write nothing. The board is still
+                          read, and JSON stays {file, written, section}
 
 OUTPUT
   Text: the path of the file, or with --dry-run the section.
@@ -80,13 +81,12 @@ init_missing_sections() {
 }
 
 cmd_init() {
-    opt_url='' opt_kind='' opt_repo='' opt_dry_run=''
+    opt_url='' opt_kind='' opt_repo=''
     while [ $# -gt 0 ]; do
         case $1 in
             -u | --url) board_arg "$@"; opt_url=$2; shift 2 ;;
             --kind) board_arg "$@"; opt_kind=$2; shift 2 ;;
             --repo) board_arg "$@"; opt_repo=$2; shift 2 ;;
-            --dry-run) opt_dry_run=1; shift ;;
             -*) board_unknown_flag "$1" ;;
             *) board_unexpected "$1" ;;
         esac
@@ -126,7 +126,7 @@ cmd_init() {
     fi
 
     init_written=false
-    if [ -z "$opt_dry_run" ] && [ -n "$(printf '%s' "$init_extra" | tr -d '[:space:]')" ]; then
+    if ! board_dry_run && [ -n "$(printf '%s' "$init_extra" | tr -d '[:space:]')" ]; then
         printf '%s\n' "$init_extra" >>"$init_file"
         init_written=true
     fi
@@ -134,7 +134,7 @@ cmd_init() {
     if board_json_mode; then
         _jq -n --arg file "$init_file" --argjson written "$init_written" --arg section "$init_text" \
             '{file: $file, written: $written, section: $section}' | board_output .
-    elif [ -n "$opt_dry_run" ]; then
+    elif board_dry_run; then
         printf '%s\n' "$init_text"
     else
         printf '%s\n' "$init_file"

@@ -13,6 +13,13 @@ def text_issue_row: "\(.id)\t\(.status.name | dash)\t\(.title | dash)";
 
 def text_issues: .[] | text_issue_row;
 
+def text_plan:
+    "dry run: board \(.command)",
+    (if (.args | length) > 0 then "args:   \(.args | map(select(. != "")) | join(" "))" else empty end),
+    (if .issue then "issue:  " + (.issue | text_issue_row) else empty end),
+    (if .status then "status: \(.status.name | dash) (\(.status.category | dash))" else empty end),
+    "nothing was changed";
+
 def text_issue:
     "\(.id)  \(.title | dash)",
     "status:     \(.status.name | dash) (\(.status.category | dash))",
@@ -28,6 +35,19 @@ def text_issue:
     "url:        \(.url | dash)",
     (if .description then "", .description else empty end),
     (if .comments then (.comments[] | "", "--- \(.author.name | dash), \(.created_at | dash)", .body) else empty end);
+
+def text_batch:
+    .[] | "\(.exit // "-")\t\(.args | join(" "))\t\(
+        if .exit == null then "not run"
+        elif .exit != 0 then (.error // "" | split("\n")[0])
+        elif (.result | type) == "object" then
+            (if .result.dry_run then "dry run" else (.result.url // .result.id // .result.name // "ok") end)
+        elif (.result | type) == "array" then "\(.result | length) items"
+        else (.result // "ok" | tostring) end)";
+
+def text_history:
+    "\(.id)\t\(.status.name | dash)\tsince \(.since | dash)",
+    (.moves[] | "\(.at | dash)\t\(.from.name | dash) -> \(.to.name | dash)\t\(.by.name | dash)");
 
 def text_comments: .[] | "\(.id)  \(.author.name | dash), \(.created_at | dash)", .body, "";
 

@@ -1363,3 +1363,33 @@ test_init_refuses_to_guess_a_team() {
     t_status 2
     t_contains "$T_ERR" 'several teams'
 }
+
+# --- history -----------------------------------------------------------------------------
+
+test_history_keeps_state_changes_from_every_page() {
+    linear_board
+    linear_issue_answer '{"id":"s-prog","name":"In Progress","type":"started"}' ''
+    cat >"$FAKE_OVERRIDE/IssueHistory.1.json" <<'EOF2'
+{"data":{"issue":{"history":{"pageInfo":{"hasNextPage":true,"endCursor":"h1"},"nodes":[
+{"createdAt":"2026-11-03T00:00:00.000Z","fromState":{"id":"s-back","name":"Backlog","type":"backlog"},"toState":{"id":"s-prog","name":"In Progress","type":"started"},"actor":{"id":"u","name":"U"}},
+{"createdAt":"2026-11-02T12:00:00.000Z","fromState":null,"toState":null,"actor":{"id":"u","name":"U"}}]}}}}
+EOF2
+    cat >"$FAKE_OVERRIDE/IssueHistory.2.json" <<'EOF2'
+{"data":{"issue":{"history":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+{"createdAt":"2026-11-02T00:00:00.000Z","fromState":{"id":"s-prog","name":"In Progress","type":"started"},"toState":{"id":"s-back","name":"Backlog","type":"backlog"},"actor":null}]}}}}
+EOF2
+    t_run board issue history 3KD-1 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves | map(.to.name)' '["Backlog","In Progress"]'
+    t_jq "$T_OUT" '.moves[0].by' null
+    t_jq "$T_OUT" '.moves[1].from' '{"name":"Backlog","category":"todo"}'
+    t_jq "$T_OUT" '.since' '"2026-11-03T00:00:00Z"'
+    t_contains "$(cat "$FAKE_LOG.stdin")" 'after: "h1"'
+}
+
+test_history_of_a_trashed_issue_is_not_found() {
+    linear_board
+    linear_issue_answer "$linear_backlog" ',"trashed":true'
+    t_run board issue history 3KD-1
+    t_status 4
+}

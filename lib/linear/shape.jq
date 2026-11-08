@@ -139,6 +139,15 @@ def ln_merge:
               .[$c].nodes += $page[$c].nodes | .[$c].pageInfo = $page[$c].pageInfo
           else . end);
 
+# Input: the nodes of an issue's history. The entries that change the state, as make_move input;
+# an integration or workflow has no actor.
+def ln_moves:
+    map(select(.toState != null)
+        | {from: (.fromState | if . then {id, name, native: (.type | ln_category)} else null end),
+           to: (.toState | {id, name, native: (.type | ln_category)}),
+           at: .createdAt,
+           by: (.actor | ln_user)});
+
 def ln_comment:
     {id, author: ((.user // .externalUser) | ln_user), body, url,
      created_at: .createdAt, updated_at: .updatedAt}

@@ -9,6 +9,7 @@ board_main() {
     BOARD_BODY=''
     BOARD_BODY_SET=''
     BOARD_SHOW_VERSION=''
+    BOARD_DRY_RUN=''
     # Inherited values would skip the steps they stand for.
     BOARD_CONFIG_LOADED=''
     BOARD_TMP=''
@@ -42,6 +43,7 @@ board_main() {
                 fi
                 ;;
             --json) BOARD_JSON=1 ;;
+            --dry-run) BOARD_DRY_RUN=1 ;;
             --jq)
                 [ "$board_n" -gt 0 ] || board_usage_die "--jq needs a value"
                 BOARD_JQ=$1 BOARD_JSON=1
@@ -93,6 +95,32 @@ board_runtime_init() {
     fi
 }
 
+# Walks the words of a command for as long as a help_ function exists for them. Sets board_node,
+# BOARD_GROUP, BOARD_PATH, and board_rs_used, the number of words it took.
+# Usage: board_resolve <words...>
+board_resolve() {
+    board_group=$1
+    board_token_ok "$board_group" || board_usage_die "unknown command '$1'"
+    if [ -f "$BOARD_HOME/lib/cmd/$board_group.sh" ]; then
+        . "$BOARD_HOME/lib/cmd/$board_group.sh"
+    fi
+    board_node=$(printf '%s' "$board_group" | tr '-' '_')
+    board_fn_exists "help_$board_node" || board_usage_die "unknown command '$1'"
+    BOARD_GROUP=$board_group
+    BOARD_PATH=$board_group
+    board_rs_used=1
+    shift
+
+    while [ $# -gt 0 ] && board_token_ok "$1"; do
+        board_next="${board_node}_$(printf '%s' "$1" | tr '-' '_')"
+        board_fn_exists "help_$board_next" || break
+        board_node=$board_next
+        BOARD_PATH="$BOARD_PATH $1"
+        board_rs_used=$((board_rs_used + 1))
+        shift
+    done
+}
+
 board_dispatch() {
     if [ -n "$BOARD_SHOW_VERSION" ]; then
         cmd_version
@@ -103,24 +131,8 @@ board_dispatch() {
         return 0
     fi
 
-    board_group=$1
-    board_token_ok "$board_group" || board_usage_die "unknown command '$1'"
-    if [ -f "$BOARD_HOME/lib/cmd/$board_group.sh" ]; then
-        . "$BOARD_HOME/lib/cmd/$board_group.sh"
-    fi
-    board_node=$(printf '%s' "$board_group" | tr '-' '_')
-    board_fn_exists "help_$board_node" || board_usage_die "unknown command '$1'"
-    BOARD_GROUP=$board_group
-    BOARD_PATH=$board_group
-    shift
-
-    while [ $# -gt 0 ] && board_token_ok "$1"; do
-        board_next="${board_node}_$(printf '%s' "$1" | tr '-' '_')"
-        board_fn_exists "help_$board_next" || break
-        board_node=$board_next
-        BOARD_PATH="$BOARD_PATH $1"
-        shift
-    done
+    board_resolve "$@"
+    shift "$board_rs_used"
 
     if [ -n "$BOARD_HELP" ]; then
         board_show_help "$board_node"
@@ -130,7 +142,7 @@ board_dispatch() {
         board_runtime_init
         # Read here so the $(board_call ...) of a command inherits it. These work without one.
         case $board_group in
-            init | version | self | doctor) ;;
+            init | version | self | doctor | batch) ;;
             *) board_config_load ;;
         esac
         "cmd_$board_node" "$@"

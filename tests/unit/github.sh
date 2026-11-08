@@ -327,3 +327,53 @@ test_an_inherited_gh_host_is_dropped_for_github_com() {
     t_status 0
     t_lacks "$(gh_log)" 'evil' log
 }
+
+# --- history -----------------------------------------------------------------------------
+
+# Usage: gh_history_page <n|""> <has_next> <nodes JSON>
+gh_history_page() {
+    printf '{"data":{"repository":{"issue":{"timelineItems":{"pageInfo":{"hasNextPage":%s,"endCursor":"c%s"},"nodes":%s}}}}}' \
+        "$2" "$1" "$3" >"$FAKE_OVERRIDE/IssueHistory${1:+.$1}.json"
+}
+
+gh_event() {
+    printf '{"createdAt":"%s","previousStatus":"%s","status":"%s","actor":{"login":"%s"},"project":{"number":%s,"owner":{"login":"a"}}}' \
+        "$1" "$2" "$3" "$4" "${5:-5}"
+}
+
+test_history_reads_every_page_and_keeps_this_project() {
+    gh_board
+    gh_issue_answer
+    gh_history_page 1 true "[$(gh_event 2026-11-01T10:00:00Z '' Todo github-project-automation),$(gh_event 2026-11-01T10:30:00Z Todo Done me 9)]"
+    gh_history_page 2 false "[$(gh_event 2026-11-02T10:00:00Z 'В работе' Todo me)]"
+    t_run board issue history 11 --json
+    t_status 0
+    t_jq "$T_OUT" '.moves | length' 2
+    t_jq "$T_OUT" '.moves[0].from' null
+    t_jq "$T_OUT" '.moves[1].from' '{"name":"В работе","category":"in_progress"}'
+    t_jq "$T_OUT" '.moves[1].by' '{"id":"me","name":"me"}'
+    t_jq "$T_OUT" '.since' '"2026-11-02T10:00:00Z"'
+    t_contains "$(gh_stdin)" '"after":"c1"'
+}
+
+test_history_with_no_moves_takes_since_from_the_status_field() {
+    gh_board
+    gh_issue_answer
+    sed 's/"optionId":"1"}/"optionId":"1","updatedAt":"2026-11-03T00:00:00Z"}/' "$FAKE_OVERRIDE/IssueView.json" >"$T_TMP/v"
+    mv "$T_TMP/v" "$FAKE_OVERRIDE/IssueView.json"
+    gh_history_page '' false '[]'
+    t_run board issue history 11 --json
+    t_status 0
+    t_jq "$T_OUT" '.since' '"2026-11-03T00:00:00Z"'
+    t_jq "$T_OUT" '.moves' '[]'
+}
+
+test_history_of_a_draft_has_no_moves_and_a_since() {
+    gh_board
+    printf '{"data":{"node":{"id":"PVTI_d","type":"DRAFT_ISSUE","isArchived":false,"status":{"name":"Todo","updatedAt":"2026-11-04T00:00:00Z"},"project":{"number":5},"content":{"__typename":"DraftIssue","id":"DI_1","title":"t","body":"","assignees":{"nodes":[]}}}}}' >"$FAKE_OVERRIDE/ItemView.json"
+    t_run board issue history PVTI_d --json
+    t_status 0
+    t_jq "$T_OUT" '.moves' '[]'
+    t_jq "$T_OUT" '.since' '"2026-11-04T00:00:00Z"'
+    t_lacks "$(gh_stdin)" IssueHistory
+}

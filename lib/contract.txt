@@ -6,6 +6,7 @@ board_view             view
 api_call               api
 issue_list             issue list
 issue_view             issue view
+issue_history          issue history
 issue_create           issue create
 issue_edit             issue edit
 issue_move             issue move

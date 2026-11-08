@@ -3,7 +3,8 @@
 # PATH so no test reaches a real board. Exit 0 only when every case passed.
 set -u
 
-root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# -P: under just on Windows a logical pwd is C:/..., whose colon cuts PATH before the fakes.
+root=$(CDPATH='' cd -P -- "$(dirname -- "$0")/.." && pwd -P)
 BOARD_TEST_ROOT=$root
 FAKE_FIXTURES=$root/tests/fixtures
 PATH=$root/tests/fake:$PATH
