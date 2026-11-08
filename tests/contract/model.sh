@@ -82,8 +82,11 @@ test_history_since_is_the_last_move_into_the_status() {
 }
 
 test_history_since_is_created_when_nothing_moved() {
-    t_jq "$(model_history "{issue: $MODEL_ISSUE, moves: []}")" .since '"2026-11-01T00:00:00Z"'
-    t_jq "$(model_history "{issue: $MODEL_ISSUE, moves: [], since: \"2026-11-05T00:00:00Z\"}")" .since '"2026-11-05T00:00:00Z"'
+    # Captured first: bash 3.2, sh on macOS, brace-expands a quoted {a, b} nested in "$(...)".
+    got=$(model_history "{issue: $MODEL_ISSUE, moves: []}")
+    t_jq "$got" .since '"2026-11-01T00:00:00Z"'
+    got=$(model_history "{issue: $MODEL_ISSUE, moves: [], since: \"2026-11-05T00:00:00Z\"}")
+    t_jq "$got" .since '"2026-11-05T00:00:00Z"'
 }
 
 test_history_since_is_null_when_the_moves_end_elsewhere() {

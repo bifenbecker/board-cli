@@ -16,7 +16,8 @@ board_lib_load() {
             *) set -- "$@" "$board_ll_file" ;;
         esac
     done
-    BOARD_LIB=$(cat "$@" "$BOARD_HOME/lib/$BOARD_KIND/shape.jq")
+    # Comment lines go: the library travels in argv, which Windows cuts near 32k.
+    BOARD_LIB=$(cat "$@" "$BOARD_HOME/lib/$BOARD_KIND/shape.jq" | sed '/^[[:space:]]*#/d')
 }
 
 board_provider_load() {

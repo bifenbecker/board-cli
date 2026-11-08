@@ -2494,7 +2494,7 @@ test_converters_are_within_their_limit() {
 
 # Every filter carries this text in argv, and Windows stops argv at about 32,000 characters.
 test_the_library_fits_in_argv() {
-    size=$(cat "$BOARD_TEST_ROOT/lib/jq/common.jq" "$BOARD_TEST_ROOT"/lib/jira/*.jq | wc -c)
+    size=$(cat "$BOARD_TEST_ROOT/lib/jq/common.jq" "$BOARD_TEST_ROOT"/lib/jira/*.jq | sed '/^[[:space:]]*#/d' | wc -c)
     [ "$size" -lt 28000 ] || t_fail "BOARD_LIB of jira is $size bytes"
 }
 
